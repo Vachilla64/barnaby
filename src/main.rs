@@ -52,10 +52,11 @@ struct DesktopPetApp {
     state_tx: watch::Sender<DesktopSnapshot>,
     event_tx: broadcast::Sender<DesktopEvent>,
 
-    // Timing & hit-testing state
+    // Timing, clicks & hit-testing state
     last_tick: Instant,
     last_scan: Instant,
     last_foreground_title: String,
+    last_click_time: Instant,
     is_interactive_hovered: bool,
 }
 
@@ -65,7 +66,6 @@ impl DesktopPetApp {
         state_tx: watch::Sender<DesktopSnapshot>,
         event_tx: broadcast::Sender<DesktopEvent>,
     ) -> Self {
-        // Query full Windows 11 virtual screen bounds spanning all active monitors
         let vx = unsafe { GetSystemMetrics(SM_XVIRTUALSCREEN) };
         let vy = unsafe { GetSystemMetrics(SM_YVIRTUALSCREEN) };
         let vw = unsafe { GetSystemMetrics(SM_CXVIRTUALSCREEN) }.max(800) as u32;
@@ -77,6 +77,7 @@ impl DesktopPetApp {
         );
 
         let world = WorldState::new(vw as f32, vh as f32);
+        let scanner = WindowScanner::new(vx, vy, vw as i32, vh as i32);
 
         Self {
             virtual_x: vx,
@@ -86,7 +87,7 @@ impl DesktopPetApp {
             window: None,
             renderer: None,
             own_hwnd: None,
-            scanner: WindowScanner::new(),
+            scanner,
             world,
             cmd_rx,
             state_tx,
@@ -94,6 +95,7 @@ impl DesktopPetApp {
             last_tick: Instant::now(),
             last_scan: Instant::now(),
             last_foreground_title: String::new(),
+            last_click_time: Instant::now() - Duration::from_secs(10),
             is_interactive_hovered: false,
         }
     }
@@ -110,10 +112,6 @@ impl DesktopPetApp {
                     let win_hwnd = HWND(hwnd as *mut _);
                     let cur_ex_style = GetWindowLongW(win_hwnd, GWL_EXSTYLE) as u32;
 
-                    // WS_EX_TOOLWINDOW: hides overlay from Alt+Tab switcher & taskbar
-                    // WS_EX_LAYERED: enables true hardware alpha transparency
-                    // WS_EX_TOPMOST: ensures overlay stays on top of full-screen windows
-                    // WS_EX_TRANSPARENT: initial click-through mode until cursor hovers pet
                     let target_ex_style = cur_ex_style
                         | WS_EX_TOOLWINDOW.0
                         | WS_EX_LAYERED.0
@@ -142,32 +140,34 @@ impl DesktopPetApp {
         let cursor_pos = WindowScanner::get_cursor_pos();
 
         let is_over_pet = if let Some((cx, cy)) = cursor_pos {
-            // Screen coordinates relative to virtual desktop canvas
             let rel_x = (cx - self.virtual_x) as f32;
             let rel_y = (cy - self.virtual_y) as f32;
-            self.world.hit_test(rel_x, rel_y)
+            self.world.cursor_pos = Some((rel_x, rel_y));
+
+            let hits = self.world.hit_test(rel_x, rel_y);
+            if hits {
+                self.world.pet_by_cursor(rel_x, rel_y);
+            }
+            hits
         } else {
+            self.world.cursor_pos = None;
             false
         };
 
         if is_over_pet != self.is_interactive_hovered {
             self.is_interactive_hovered = is_over_pet;
 
-            // Update winit cursor hit-testing
             if let Some(window) = &self.window {
                 let _ = window.set_cursor_hittest(is_over_pet);
             }
 
-            // Update Win32 WS_EX_TRANSPARENT directly for seamless OS click-through
             if let Some(hwnd) = self.own_hwnd {
                 unsafe {
                     let win_hwnd = HWND(hwnd as *mut _);
                     let cur_ex = GetWindowLongW(win_hwnd, GWL_EXSTYLE) as u32;
                     let target_ex = if is_over_pet {
-                        // Interactive: remove WS_EX_TRANSPARENT so user can drag/click pet
                         cur_ex & !WS_EX_TRANSPARENT.0
                     } else {
-                        // Click-through: set WS_EX_TRANSPARENT so clicks reach apps below
                         cur_ex | WS_EX_TRANSPARENT.0
                     };
 
@@ -293,10 +293,8 @@ impl ApplicationHandler for DesktopPetApp {
             }
         };
 
-        // Apply native Win32 WS_EX_TOOLWINDOW and WS_EX_LAYERED styles
         self.setup_win32_window_styles(&window);
 
-        // Initialize softbuffer + tiny-skia CPU renderer
         match SoftbufferSkiaRenderer::new(window.clone(), self.virtual_w, self.virtual_h) {
             Ok(renderer) => {
                 info!("Softbuffer 2D CPU renderer initialized successfully");
@@ -322,22 +320,39 @@ impl ApplicationHandler for DesktopPetApp {
                     renderer.resize(size.width, size.height);
                     self.world.screen_width = size.width as f32;
                     self.world.screen_height = size.height as f32;
+                    self.scanner.set_screen_bounds(
+                        self.virtual_x,
+                        self.virtual_y,
+                        size.width as i32,
+                        size.height as i32,
+                    );
                 }
             }
 
-            WindowEvent::MouseInput { state, button: MouseButton::Left, .. } => {
+            WindowEvent::MouseInput { state, button, .. } => {
                 if let Some((cx, cy)) = WindowScanner::get_cursor_pos() {
                     let rel_x = (cx - self.virtual_x) as f32;
                     let rel_y = (cy - self.virtual_y) as f32;
 
-                    match state {
-                        ElementState::Pressed => {
+                    match (button, state) {
+                        (MouseButton::Left, ElementState::Pressed) => {
                             if self.world.hit_test(rel_x, rel_y) {
-                                self.world.start_drag(rel_x, rel_y);
+                                let now = Instant::now();
+                                if now.duration_since(self.last_click_time).as_millis() < 350 {
+                                    // Double click: acrobatic backflip trick!
+                                    self.world.handle_double_click();
+                                    self.last_click_time = now - Duration::from_secs(1);
+                                } else {
+                                    // Single click poke + start drag
+                                    self.world.handle_single_click();
+                                    self.world.start_drag(rel_x, rel_y);
+                                    self.last_click_time = now;
+                                }
                                 let _ = self.event_tx.send(DesktopEvent::PetClicked { x: rel_x, y: rel_y });
                             }
                         }
-                        ElementState::Released => {
+
+                        (MouseButton::Left, ElementState::Released) => {
                             if self.world.state_kind == crate::physics::PetStateKind::DraggedByUser {
                                 self.world.release_drag();
                                 let _ = self.event_tx.send(DesktopEvent::PetThrown {
@@ -346,6 +361,13 @@ impl ApplicationHandler for DesktopPetApp {
                                 });
                             }
                         }
+
+                        (MouseButton::Right, ElementState::Pressed) => {
+                            // Right click: toss a delicious treat for the pet to chase and eat!
+                            self.world.toss_treat(rel_x, rel_y);
+                        }
+
+                        _ => {}
                     }
                 }
             }
@@ -369,7 +391,6 @@ impl ApplicationHandler for DesktopPetApp {
         let now = Instant::now();
         let dt = now.duration_since(self.last_tick).as_secs_f32().min(0.05);
 
-        // Run 60Hz physics, animation, and dynamic hit-testing loop
         if dt >= 1.0 / 60.0 {
             self.last_tick = now;
 
@@ -381,7 +402,6 @@ impl ApplicationHandler for DesktopPetApp {
                 self.last_scan = now;
                 let scanned = self.scanner.scan_windows();
 
-                // Track foreground window change events
                 let fg_title = WindowScanner::get_foreground_window_title();
                 if fg_title != self.last_foreground_title && !fg_title.is_empty() {
                     self.last_foreground_title = fg_title.clone();
@@ -392,42 +412,42 @@ impl ApplicationHandler for DesktopPetApp {
                     });
                 }
 
-                // Update walkable platforms with Z-order occlusion subtraction
+                // Check user idle ms
+                let idle_ms = WindowScanner::check_user_idle_ms();
+                self.world.handle_user_idle(idle_ms);
+
+                // Update walkable platforms with fullscreen exclusions & Z-order occlusion subtraction
                 self.world.update_platforms(scanned);
             }
 
-            // 3. Advance physics, platform collisions, and window riding
+            // 3. Advance physics, platform collisions, particles, and window riding
             let prev_standing = self.world.standing_on;
             self.world.tick(dt);
 
-            // Emit event if pet landed on a new window
             if self.world.standing_on.is_some() && self.world.standing_on != prev_standing {
                 let hwnd = self.world.standing_on.unwrap();
                 let title = self.world.scanned_windows.iter().find(|w| w.hwnd == hwnd)
                     .map(|w| w.title.clone())
-                    .unwrap_or_else(|| "Desktop Ground".to_string());
+                    .unwrap_or_else(|| "Desktop Floor".to_string());
                 let _ = self.event_tx.send(DesktopEvent::PetLandedOnWindow { hwnd, title });
             }
 
-            // 4. Update dynamic hit-testing (click-through toggle)
+            // 4. Update dynamic hit-testing (click-through toggle & petting detection)
             self.update_dynamic_hit_testing();
 
             // 5. Broadcast snapshot to REST/WebSocket
             self.broadcast_state_snapshot();
 
-            // Request next frame render
             if let Some(window) = &self.window {
                 window.request_redraw();
             }
         }
 
-        // Set target frame timing for ~60 FPS
         event_loop.set_control_flow(ControlFlow::WaitUntil(Instant::now() + Duration::from_millis(16)));
     }
 }
 
 fn main() {
-    // Initialize tracing subscriber for logging
     tracing_subscriber::registry()
         .with(EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()))
         .with(tracing_subscriber::fmt::layer())
@@ -435,13 +455,11 @@ fn main() {
 
     info!("Starting Windows 11 Desktop Pet Interactivity Engine...");
 
-    // Create asynchronous multi-threaded Tokio runtime
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()
         .expect("Failed to initialize Tokio runtime");
 
-    // Decoupled communication channels
     let (cmd_tx, cmd_rx) = mpsc::channel::<PetCommand>(64);
     let (state_tx, state_rx) = watch::channel::<DesktopSnapshot>(DesktopSnapshot {
         pet_x: 500.0,
@@ -458,13 +476,11 @@ fn main() {
     });
     let (event_tx, _event_rx) = broadcast::channel::<DesktopEvent>(128);
 
-    // Spawn Phase 1 Axum REST & WebSocket Server in background
     let event_tx_clone = event_tx.clone();
     rt.spawn(async move {
         start_axum_server(cmd_tx, state_rx, event_tx_clone);
     });
 
-    // Run Winit 0.30 ApplicationHandler event loop on main OS thread
     let event_loop = match EventLoop::new() {
         Ok(el) => el,
         Err(e) => {

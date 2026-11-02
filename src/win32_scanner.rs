@@ -8,6 +8,9 @@ use windows::Win32::Graphics::Dwm::{
 use windows::Win32::Graphics::Gdi::ClientToScreen;
 use windows::Win32::System::SystemInformation::GetTickCount64;
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINFO};
+use windows::Win32::UI::Shell::{
+    SHAppBarMessage, ABM_GETSTATE, ABM_GETTASKBARPOS, APPBARDATA,
+};
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumWindows, FindWindowW, GetCursorPos, GetForegroundWindow,
     GetGUIThreadInfo, GetWindowLongW, GetWindowRect, GetWindowTextW,
@@ -23,6 +26,7 @@ pub struct ScannedWindow {
     pub bounds: WindowBounds,
     pub is_active: bool,
     pub is_taskbar: bool,
+    pub is_fullscreen: bool,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -51,17 +55,38 @@ impl WindowBounds {
 struct EnumContext<'a> {
     own_hwnd: Option<HWND>,
     foreground_hwnd: HWND,
+    screen_x: i32,
+    screen_y: i32,
+    screen_w: i32,
+    screen_h: i32,
     windows: &'a mut Vec<ScannedWindow>,
 }
 
 /// Win32 Desktop Scanner and Active Manipulation Manager
 pub struct WindowScanner {
     own_hwnd: Option<HWND>,
+    screen_x: i32,
+    screen_y: i32,
+    screen_w: i32,
+    screen_h: i32,
 }
 
 impl WindowScanner {
-    pub fn new() -> Self {
-        Self { own_hwnd: None }
+    pub fn new(screen_x: i32, screen_y: i32, screen_w: i32, screen_h: i32) -> Self {
+        Self {
+            own_hwnd: None,
+            screen_x,
+            screen_y,
+            screen_w,
+            screen_h,
+        }
+    }
+
+    pub fn set_screen_bounds(&mut self, x: i32, y: i32, w: i32, h: i32) {
+        self.screen_x = x;
+        self.screen_y = y;
+        self.screen_w = w;
+        self.screen_h = h;
     }
 
     /// Set our own overlay window HWND so it gets excluded from collision detection and platform extraction.
@@ -77,6 +102,10 @@ impl WindowScanner {
         let mut data = EnumContext {
             own_hwnd: self.own_hwnd,
             foreground_hwnd,
+            screen_x: self.screen_x,
+            screen_y: self.screen_y,
+            screen_w: self.screen_w,
+            screen_h: self.screen_h,
             windows: &mut scanned,
         };
 
@@ -87,9 +116,16 @@ impl WindowScanner {
             );
         }
 
-        // 2. Scan and append the Windows 11 Taskbar ("Shell_TrayWnd") as a static foundational platform
-        if let Some(taskbar) = Self::scan_taskbar() {
-            scanned.push(taskbar);
+        // Check if the foreground window is fullscreen.
+        // If an active app is fullscreen (e.g. game, video, or maximized borderless app),
+        // the taskbar is suppressed/occluded.
+        let foreground_is_fullscreen = scanned.iter().any(|w| w.is_active && w.is_fullscreen);
+
+        // 2. Scan and append the Windows 11 Taskbar ONLY if it is truly active and visible
+        if !foreground_is_fullscreen {
+            if let Some(taskbar) = Self::scan_taskbar(self.screen_h) {
+                scanned.push(taskbar);
+            }
         }
 
         scanned
@@ -146,7 +182,6 @@ impl WindowScanner {
                 bottom: frame_rect.bottom,
             }
         } else {
-            // Fallback to standard window rect
             let mut win_rect = RECT::default();
             if GetWindowRect(hwnd, &mut win_rect).is_err() {
                 return BOOL(1);
@@ -159,10 +194,17 @@ impl WindowScanner {
             }
         };
 
-        // Filter 6: Ignore windows with zero or negative dimensions (minimized/offscreen/hidden)
+        // Filter 6: Ignore windows with zero or tiny dimensions
         if bounds.width() <= 16 || bounds.height() <= 16 {
             return BOOL(1);
         }
+
+        // Detect if window is FULLSCREEN (covers entire screen bounds)
+        // When a window is fullscreen, its top edge is at y <= 0 and should NOT be a platform collider!
+        let is_fullscreen = bounds.left <= data.screen_x + 8
+            && bounds.top <= data.screen_y + 8
+            && bounds.right >= data.screen_x + data.screen_w - 8
+            && bounds.bottom >= data.screen_y + data.screen_h - 8;
 
         // Extract window title
         let mut title_buf = [0u16; 512];
@@ -181,13 +223,14 @@ impl WindowScanner {
             bounds,
             is_active,
             is_taskbar: false,
+            is_fullscreen,
         });
 
         BOOL(1)
     }
 
-    /// Queries the Windows Taskbar ("Shell_TrayWnd") bounds.
-    pub fn scan_taskbar() -> Option<ScannedWindow> {
+    /// Queries the Windows Taskbar ("Shell_TrayWnd") bounds and checks if it is truly active and not auto-hidden.
+    pub fn scan_taskbar(screen_height: i32) -> Option<ScannedWindow> {
         unsafe {
             let taskbar_hwnd = FindWindowW(w!("Shell_TrayWnd"), PCWSTR::null());
             if taskbar_hwnd.is_err() {
@@ -198,33 +241,77 @@ impl WindowScanner {
                 return None;
             }
 
-            let mut frame_rect = RECT::default();
-            let res = DwmGetWindowAttribute(
+            // Check if taskbar is cloaked
+            let mut cloaked: u32 = 0;
+            let cloaked_res = DwmGetWindowAttribute(
                 hwnd,
-                DWMWA_EXTENDED_FRAME_BOUNDS,
-                &mut frame_rect as *mut _ as *mut c_void,
-                size_of::<RECT>() as u32,
+                DWMWA_CLOAKED,
+                &mut cloaked as *mut _ as *mut c_void,
+                size_of::<u32>() as u32,
             );
+            if cloaked_res.is_ok() && cloaked != 0 {
+                return None;
+            }
 
-            let bounds = if res.is_ok() {
+            // Check if Auto-Hide is enabled on the taskbar
+            let mut app_bar_data = APPBARDATA {
+                cbSize: size_of::<APPBARDATA>() as u32,
+                hWnd: hwnd,
+                ..Default::default()
+            };
+            let state = SHAppBarMessage(ABM_GETSTATE, &mut app_bar_data);
+            // ABS_AUTOHIDE = 0x01
+            let is_autohide = (state as u32 & 0x01) != 0;
+
+            // Query true position from SHAppBarMessage
+            let mut pos_data = APPBARDATA {
+                cbSize: size_of::<APPBARDATA>() as u32,
+                hWnd: hwnd,
+                ..Default::default()
+            };
+            let has_pos = SHAppBarMessage(ABM_GETTASKBARPOS, &mut pos_data) != 0;
+
+            let bounds = if has_pos {
                 WindowBounds {
-                    left: frame_rect.left,
-                    top: frame_rect.top,
-                    right: frame_rect.right,
-                    bottom: frame_rect.bottom,
+                    left: pos_data.rc.left,
+                    top: pos_data.rc.top,
+                    right: pos_data.rc.right,
+                    bottom: pos_data.rc.bottom,
                 }
             } else {
-                let mut rect = RECT::default();
-                if GetWindowRect(hwnd, &mut rect).is_err() {
-                    return None;
-                }
-                WindowBounds {
-                    left: rect.left,
-                    top: rect.top,
-                    right: rect.right,
-                    bottom: rect.bottom,
+                let mut frame_rect = RECT::default();
+                let res = DwmGetWindowAttribute(
+                    hwnd,
+                    DWMWA_EXTENDED_FRAME_BOUNDS,
+                    &mut frame_rect as *mut _ as *mut c_void,
+                    size_of::<RECT>() as u32,
+                );
+                if res.is_ok() {
+                    WindowBounds {
+                        left: frame_rect.left,
+                        top: frame_rect.top,
+                        right: frame_rect.right,
+                        bottom: frame_rect.bottom,
+                    }
+                } else {
+                    let mut rect = RECT::default();
+                    if GetWindowRect(hwnd, &mut rect).is_err() {
+                        return None;
+                    }
+                    WindowBounds {
+                        left: rect.left,
+                        top: rect.top,
+                        right: rect.right,
+                        bottom: rect.bottom,
+                    }
                 }
             };
+
+            // If the taskbar is auto-hidden or retracted, its top edge is offscreen or height <= 6
+            if is_autohide || bounds.height() <= 6 || bounds.top >= screen_height - 6 {
+                // Taskbar is retracted or in autohide, so it shouldn't form a standing platform!
+                return None;
+            }
 
             Some(ScannedWindow {
                 hwnd: hwnd.0 as isize,
@@ -232,6 +319,7 @@ impl WindowScanner {
                 bounds,
                 is_active: false,
                 is_taskbar: true,
+                is_fullscreen: false,
             })
         }
     }
@@ -249,7 +337,6 @@ impl WindowScanner {
     }
 
     /// Track text caret in active foreground window using `GetGUIThreadInfo`.
-    /// Returns screen coordinates (x, y) of the text typing cursor if available.
     pub fn track_text_caret() -> Option<(i32, i32)> {
         unsafe {
             let mut info = GUITHREADINFO {

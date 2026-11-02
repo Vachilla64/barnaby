@@ -8,7 +8,9 @@ use tracing::{error, warn};
 use winit::window::Window;
 
 use super::RenderBackend;
-use crate::physics::{PetStateKind, WorldState, PET_HEIGHT, PET_WIDTH};
+use crate::physics::{
+    ParticleType, PetStateKind, WorldState, PET_HEIGHT, PET_WIDTH,
+};
 
 /// Software 2D Renderer using `softbuffer` and `tiny-skia` with full Windows 11 premultiplied alpha transparency.
 pub struct SoftbufferSkiaRenderer {
@@ -72,15 +74,18 @@ impl RenderBackend for SoftbufferSkiaRenderer {
             Self::draw_debug_overlay(pixmap, world);
         }
 
-        // 2. Draw Procedural Animated Pet
+        // 2. Draw Floating Particles (Hearts, Sparkles, Zzz, Treats)
+        Self::draw_particles(pixmap, world);
+
+        // 3. Draw Procedural Animated Pet
         Self::draw_animated_pet(pixmap, world);
 
-        // 3. Draw Speech Bubble if present
+        // 4. Draw Speech Bubble if present
         if let Some(speech) = &world.active_speech {
             Self::draw_speech_bubble(pixmap, world, &speech.text);
         }
 
-        // 4. Blit tiny-skia RGBA premultiplied pixels to softbuffer 0xAARRGGBB format
+        // 5. Blit tiny-skia RGBA premultiplied pixels to softbuffer 0xAARRGGBB format
         let mut buffer = match self.surface.buffer_mut() {
             Ok(b) => b,
             Err(e) => {
@@ -98,7 +103,6 @@ impl RenderBackend for SoftbufferSkiaRenderer {
             let g = src[1] as u32;
             let b = src[2] as u32;
             let a = src[3] as u32;
-            // Windows DWM 32-bit premultiplied ARGB: (A << 24) | (R << 16) | (G << 8) | B
             *dst = (a << 24) | (r << 16) | (g << 8) | b;
         }
 
@@ -127,13 +131,29 @@ impl SoftbufferSkiaRenderer {
         let bottom_y = y + PET_HEIGHT;
         let top_y = bottom_y - eff_height;
 
+        // Dynamic transform for acrobatics (backflips)
+        let transform = if world.rotation_rad != 0.0 {
+            let rad = world.rotation_rad;
+            let cos = rad.cos();
+            let sin = rad.sin();
+            let cy = y + PET_HEIGHT / 2.0;
+            Transform::from_row(
+                cos, sin,
+                -sin, cos,
+                center_x - (center_x * cos - cy * sin),
+                cy - (center_x * sin + cy * cos),
+            )
+        } else {
+            Transform::identity()
+        };
+
         let mut paint = Paint::default();
         paint.anti_alias = true;
 
         // A. Draw Feet / Paws
         let foot_y_offset = match world.state_kind {
             PetStateKind::Walking => walk_cycle * 3.5,
-            PetStateKind::Sitting => -2.0,
+            PetStateKind::Sitting | PetStateKind::Sleeping => -2.0,
             PetStateKind::DraggedByUser | PetStateKind::Falling => 4.0,
             _ => 0.0,
         };
@@ -150,7 +170,7 @@ impl SoftbufferSkiaRenderer {
             let mut pb = PathBuilder::new();
             pb.push_rect(r);
             if let Some(path) = pb.finish() {
-                pixmap.fill_path(&path, &paint, FillRule::Winding, Transform::identity(), None);
+                pixmap.fill_path(&path, &paint, FillRule::Winding, transform, None);
             }
         }
 
@@ -165,7 +185,7 @@ impl SoftbufferSkiaRenderer {
             let mut pb = PathBuilder::new();
             pb.push_rect(r);
             if let Some(path) = pb.finish() {
-                pixmap.fill_path(&path, &paint, FillRule::Winding, Transform::identity(), None);
+                pixmap.fill_path(&path, &paint, FillRule::Winding, transform, None);
             }
         }
 
@@ -179,7 +199,6 @@ impl SoftbufferSkiaRenderer {
 
         if let Some(r) = body_rect {
             let mut pb = PathBuilder::new();
-            // Rounded teardrop / pill body
             let radius = 18.0;
             pb.move_to(r.left() + radius, r.top());
             pb.line_to(r.right() - radius, r.top());
@@ -195,25 +214,23 @@ impl SoftbufferSkiaRenderer {
             if let Some(path) = pb.finish() {
                 // Vibrant Cyan / Neon Turquoise body
                 paint.set_color_rgba8(30, 220, 245, 245);
-                pixmap.fill_path(&path, &paint, FillRule::Winding, Transform::identity(), None);
+                pixmap.fill_path(&path, &paint, FillRule::Winding, transform, None);
 
-                // Deep outline
                 let mut stroke = Stroke::default();
                 stroke.width = 2.5;
                 paint.set_color_rgba8(10, 80, 120, 255);
-                pixmap.stroke_path(&path, &paint, &stroke, Transform::identity(), None);
+                pixmap.stroke_path(&path, &paint, &stroke, transform, None);
             }
         }
 
         // C. Draw Cute Ears / Horns
         let ear_wiggle = (t * 8.0).sin() * 2.0;
         let mut pb_ear = PathBuilder::new();
-        // Left Ear
         pb_ear.move_to(center_x - 16.0, top_y + 4.0);
         pb_ear.line_to(center_x - 12.0 + ear_wiggle, top_y - 12.0);
         pb_ear.line_to(center_x - 4.0, top_y + 2.0);
         pb_ear.close();
-        // Right Ear
+
         pb_ear.move_to(center_x + 4.0, top_y + 2.0);
         pb_ear.line_to(center_x + 12.0 - ear_wiggle, top_y - 12.0);
         pb_ear.line_to(center_x + 16.0, top_y + 4.0);
@@ -221,28 +238,35 @@ impl SoftbufferSkiaRenderer {
 
         if let Some(ear_path) = pb_ear.finish() {
             paint.set_color_rgba8(255, 80, 160, 240); // Neon Pink inner ears
-            pixmap.fill_path(&ear_path, &paint, FillRule::Winding, Transform::identity(), None);
+            pixmap.fill_path(&ear_path, &paint, FillRule::Winding, transform, None);
         }
 
-        // D. Draw Eyes
+        // D. Draw Eyes & Gaze Direction (Tracks Cursor)
         let eye_y = top_y + eff_height * 0.42;
-        let eye_offset_x = if world.facing_right { 3.0 } else { -3.0 };
+        let (cursor_dx, cursor_dy) = if let Some((cx, cy)) = world.cursor_pos {
+            let dx = ((cx - center_x) / 100.0).clamp(-2.5, 2.5);
+            let dy = ((cy - eye_y) / 100.0).clamp(-2.0, 2.0);
+            (dx, dy)
+        } else {
+            let dx = if world.facing_right { 1.5 } else { -1.5 };
+            (dx, 0.0)
+        };
 
-        if is_blinking || world.state_kind == PetStateKind::Sitting {
+        if is_blinking || world.state_kind == PetStateKind::Sitting || world.state_kind == PetStateKind::Sleeping || world.state_kind == PetStateKind::Petted {
             // Happy closed eyes (^ ^)
             let mut stroke = Stroke::default();
             stroke.width = 2.5;
             paint.set_color_rgba8(15, 30, 50, 255);
 
             let mut pb_eyes = PathBuilder::new();
-            pb_eyes.move_to(center_x - 14.0 + eye_offset_x, eye_y);
-            pb_eyes.quad_to(center_x - 10.0 + eye_offset_x, eye_y - 5.0, center_x - 6.0 + eye_offset_x, eye_y);
+            pb_eyes.move_to(center_x - 14.0, eye_y);
+            pb_eyes.quad_to(center_x - 10.0, eye_y - 5.0, center_x - 6.0, eye_y);
 
-            pb_eyes.move_to(center_x + 6.0 + eye_offset_x, eye_y);
-            pb_eyes.quad_to(center_x + 10.0 + eye_offset_x, eye_y - 5.0, center_x + 14.0 + eye_offset_x, eye_y);
+            pb_eyes.move_to(center_x + 6.0, eye_y);
+            pb_eyes.quad_to(center_x + 10.0, eye_y - 5.0, center_x + 14.0, eye_y);
 
             if let Some(path) = pb_eyes.finish() {
-                pixmap.stroke_path(&path, &paint, &stroke, Transform::identity(), None);
+                pixmap.stroke_path(&path, &paint, &stroke, transform, None);
             }
         } else {
             // Expressive Open Eyes
@@ -251,41 +275,141 @@ impl SoftbufferSkiaRenderer {
 
             // Eye whites
             paint.set_color_rgba8(255, 255, 255, 255);
-            let left_eye = Rect::from_xywh(center_x - 13.0 + eye_offset_x, eye_y - eye_h / 2.0, eye_w, eye_h);
-            let right_eye = Rect::from_xywh(center_x + 7.0 + eye_offset_x, eye_y - eye_h / 2.0, eye_w, eye_h);
+            let left_eye = Rect::from_xywh(center_x - 13.0, eye_y - eye_h / 2.0, eye_w, eye_h);
+            let right_eye = Rect::from_xywh(center_x + 7.0, eye_y - eye_h / 2.0, eye_w, eye_h);
 
             for eye_rect in [left_eye, right_eye].into_iter().flatten() {
                 let mut pb = PathBuilder::new();
                 pb.push_rect(eye_rect);
                 if let Some(path) = pb.finish() {
-                    pixmap.fill_path(&path, &paint, FillRule::Winding, Transform::identity(), None);
+                    pixmap.fill_path(&path, &paint, FillRule::Winding, transform, None);
                 }
             }
 
-            // Pupils
+            // Pupils with dynamic cursor tracking
             paint.set_color_rgba8(15, 25, 45, 255);
-            let pupil_dx = if world.facing_right { 1.5 } else { -1.5 };
-            let left_pupil = Rect::from_xywh(center_x - 11.5 + eye_offset_x + pupil_dx, eye_y - 2.5, 3.5, 5.0);
-            let right_pupil = Rect::from_xywh(center_x + 8.5 + eye_offset_x + pupil_dx, eye_y - 2.5, 3.5, 5.0);
+            let left_pupil = Rect::from_xywh(center_x - 11.5 + cursor_dx, eye_y - 2.5 + cursor_dy, 3.5, 5.0);
+            let right_pupil = Rect::from_xywh(center_x + 8.5 + cursor_dx, eye_y - 2.5 + cursor_dy, 3.5, 5.0);
 
             for pupil_rect in [left_pupil, right_pupil].into_iter().flatten() {
                 let mut pb = PathBuilder::new();
                 pb.push_rect(pupil_rect);
                 if let Some(path) = pb.finish() {
-                    pixmap.fill_path(&path, &paint, FillRule::Winding, Transform::identity(), None);
+                    pixmap.fill_path(&path, &paint, FillRule::Winding, transform, None);
                 }
             }
         }
 
         // E. Cute Blush Cheeks
-        paint.set_color_rgba8(255, 120, 160, 180);
+        let blush_alpha = if world.state_kind == PetStateKind::Petted { 240 } else { 180 };
+        paint.set_color_rgba8(255, 100, 160, blush_alpha);
         let left_cheek = Rect::from_xywh(center_x - 17.0, eye_y + 5.0, 5.0, 3.0);
         let right_cheek = Rect::from_xywh(center_x + 12.0, eye_y + 5.0, 5.0, 3.0);
         for cheek in [left_cheek, right_cheek].into_iter().flatten() {
             let mut pb = PathBuilder::new();
             pb.push_rect(cheek);
             if let Some(path) = pb.finish() {
-                pixmap.fill_path(&path, &paint, FillRule::Winding, Transform::identity(), None);
+                pixmap.fill_path(&path, &paint, FillRule::Winding, transform, None);
+            }
+        }
+
+        // F. Cute Eating Animation Mouth
+        if world.state_kind == PetStateKind::Eating {
+            let chew = ((t * 16.0).sin() * 2.5).abs();
+            let mut pb_mouth = PathBuilder::new();
+            pb_mouth.move_to(center_x - 4.0, eye_y + 6.0);
+            pb_mouth.quad_to(center_x, eye_y + 6.0 + chew, center_x + 4.0, eye_y + 6.0);
+            if let Some(mp) = pb_mouth.finish() {
+                let mut stroke = Stroke::default();
+                stroke.width = 2.0;
+                paint.set_color_rgba8(200, 40, 80, 255);
+                pixmap.stroke_path(&mp, &paint, &stroke, transform, None);
+            }
+        }
+    }
+
+    /// Renders floating particles: Hearts, Sparkles, Zzz, Treats
+    fn draw_particles(pixmap: &mut Pixmap, world: &WorldState) {
+        let mut paint = Paint::default();
+        paint.anti_alias = true;
+
+        for p in &world.particles {
+            let alpha_ratio = (p.lifetime / p.max_lifetime).clamp(0.0, 1.0);
+            let alpha = (alpha_ratio * 255.0) as u8;
+
+            match p.particle_type {
+                ParticleType::Heart => {
+                    paint.set_color_rgba8(255, 50, 120, alpha);
+                    let mut pb = PathBuilder::new();
+                    let s = p.size;
+                    pb.move_to(p.x, p.y);
+                    pb.cubic_to(p.x - s / 2.0, p.y - s / 2.0, p.x - s, p.y + s / 3.0, p.x, p.y + s);
+                    pb.cubic_to(p.x + s, p.y + s / 3.0, p.x + s / 2.0, p.y - s / 2.0, p.x, p.y);
+                    pb.close();
+                    if let Some(path) = pb.finish() {
+                        pixmap.fill_path(&path, &paint, FillRule::Winding, Transform::identity(), None);
+                    }
+                }
+
+                ParticleType::Sparkle { r, g, b } => {
+                    paint.set_color_rgba8(r, g, b, alpha);
+                    let mut pb = PathBuilder::new();
+                    let s = p.size;
+                    pb.move_to(p.x, p.y - s);
+                    pb.line_to(p.x + s * 0.3, p.y);
+                    pb.line_to(p.x + s, p.y);
+                    pb.line_to(p.x + s * 0.3, p.y + s * 0.3);
+                    pb.line_to(p.x, p.y + s);
+                    pb.line_to(p.x - s * 0.3, p.y + s * 0.3);
+                    pb.line_to(p.x - s, p.y);
+                    pb.line_to(p.x - s * 0.3, p.y);
+                    pb.close();
+                    if let Some(path) = pb.finish() {
+                        pixmap.fill_path(&path, &paint, FillRule::Winding, Transform::identity(), None);
+                    }
+                }
+
+                ParticleType::Zzz => {
+                    let mut stroke = Stroke::default();
+                    stroke.width = 2.0;
+                    paint.set_color_rgba8(160, 210, 255, alpha);
+
+                    let mut pb = PathBuilder::new();
+                    let s = p.size;
+                    pb.move_to(p.x - s / 2.0, p.y - s / 2.0);
+                    pb.line_to(p.x + s / 2.0, p.y - s / 2.0);
+                    pb.line_to(p.x - s / 2.0, p.y + s / 2.0);
+                    pb.line_to(p.x + s / 2.0, p.y + s / 2.0);
+
+                    if let Some(path) = pb.finish() {
+                        pixmap.stroke_path(&path, &paint, &stroke, Transform::identity(), None);
+                    }
+                }
+
+                ParticleType::Treat => {
+                    // Draw a strawberry/berry treat!
+                    paint.set_color_rgba8(255, 60, 90, 240);
+                    let mut pb = PathBuilder::new();
+                    let s = p.size;
+                    pb.move_to(p.x, p.y - s / 2.0);
+                    pb.cubic_to(p.x + s / 2.0, p.y - s / 2.0, p.x + s / 2.0, p.y + s / 2.0, p.x, p.y + s);
+                    pb.cubic_to(p.x - s / 2.0, p.y + s / 2.0, p.x - s / 2.0, p.y - s / 2.0, p.x, p.y - s / 2.0);
+                    pb.close();
+                    if let Some(path) = pb.finish() {
+                        pixmap.fill_path(&path, &paint, FillRule::Winding, Transform::identity(), None);
+                    }
+
+                    // Green leaf on top
+                    paint.set_color_rgba8(50, 220, 80, 240);
+                    let mut pb_leaf = PathBuilder::new();
+                    pb_leaf.move_to(p.x, p.y - s / 2.0);
+                    pb_leaf.line_to(p.x - 4.0, p.y - s / 2.0 - 4.0);
+                    pb_leaf.line_to(p.x + 4.0, p.y - s / 2.0 - 4.0);
+                    pb_leaf.close();
+                    if let Some(lp) = pb_leaf.finish() {
+                        pixmap.fill_path(&lp, &paint, FillRule::Winding, Transform::identity(), None);
+                    }
+                }
             }
         }
     }
@@ -303,7 +427,6 @@ impl SoftbufferSkiaRenderer {
         let bubble_top = bubble_bottom - bubble_height;
 
         let mut pb = PathBuilder::new();
-        // Bubble rounded box
         let r = 8.0;
         pb.move_to(bubble_left + r, bubble_top);
         pb.line_to(bubble_left + bubble_width - r, bubble_top);
@@ -311,7 +434,6 @@ impl SoftbufferSkiaRenderer {
         pb.line_to(bubble_left + bubble_width, bubble_top + bubble_height - r);
         pb.quad_to(bubble_left + bubble_width, bubble_top + bubble_height, bubble_left + bubble_width - r, bubble_top + bubble_height);
 
-        // Pointer triangle pointing down to pet
         let ptr_x = center_x.clamp(bubble_left + 16.0, bubble_left + bubble_width - 16.0);
         pb.line_to(ptr_x + 6.0, bubble_top + bubble_height);
         pb.line_to(ptr_x, bubble_bottom);
@@ -327,21 +449,17 @@ impl SoftbufferSkiaRenderer {
             let mut paint = Paint::default();
             paint.anti_alias = true;
 
-            // Fill: Crisp translucent white
             paint.set_color_rgba8(250, 252, 255, 240);
             pixmap.fill_path(&bubble_path, &paint, FillRule::Winding, Transform::identity(), None);
 
-            // Border: Slate dark
             let mut stroke = Stroke::default();
             stroke.width = 1.5;
             paint.set_color_rgba8(30, 41, 59, 230);
             pixmap.stroke_path(&bubble_path, &paint, &stroke, Transform::identity(), None);
 
-            // Render stylized text placeholder lines or minimal glyphs
             paint.set_color_rgba8(15, 23, 42, 220);
             let text_rect = Rect::from_xywh(bubble_left + 10.0, bubble_top + 8.0, bubble_width - 20.0, bubble_height - 16.0);
             if let Some(tr) = text_rect {
-                // Procedural stylized text representation (horizontal typography lines)
                 let line_y = tr.top() + tr.height() / 2.0 - 1.0;
                 let mut pb_text = PathBuilder::new();
                 pb_text.move_to(tr.left() + 4.0, line_y);
@@ -366,6 +484,13 @@ impl SoftbufferSkiaRenderer {
         paint.set_color_rgba8(0, 220, 255, 140);
 
         for win in &world.scanned_windows {
+            // Highlight fullscreen windows in deep amber/orange
+            if win.is_fullscreen {
+                paint.set_color_rgba8(255, 140, 0, 100);
+            } else {
+                paint.set_color_rgba8(0, 220, 255, 140);
+            }
+
             let rect = Rect::from_xywh(
                 win.bounds.left as f32,
                 win.bounds.top as f32,
@@ -384,14 +509,13 @@ impl SoftbufferSkiaRenderer {
         // 2. Draw Walkable Platforms (Bright Neon Lime/Green Segments)
         let mut stroke_plat = Stroke::default();
         stroke_plat.width = 3.5;
-        paint.set_color_rgba8(57, 255, 20, 240); // Neon Lime
+        paint.set_color_rgba8(57, 255, 20, 240);
 
         for plat in &world.platforms {
             let mut pb = PathBuilder::new();
             pb.move_to(plat.x1, plat.y);
             pb.line_to(plat.x2, plat.y);
 
-            // Vertical tick marks on platform ends
             pb.move_to(plat.x1, plat.y - 4.0);
             pb.line_to(plat.x1, plat.y + 4.0);
             pb.move_to(plat.x2, plat.y - 4.0);
@@ -402,7 +526,7 @@ impl SoftbufferSkiaRenderer {
             }
         }
 
-        // 3. Draw Pet Bounding Box & Foot Anchor (Neon Magenta / Pink)
+        // 3. Draw Pet Bounding Box & Foot Anchor
         let mut stroke_pet = Stroke::default();
         stroke_pet.width = 2.0;
         paint.set_color_rgba8(255, 0, 128, 220);
@@ -410,7 +534,6 @@ impl SoftbufferSkiaRenderer {
         if let Some(r) = Rect::from_xywh(world.x, world.y, PET_WIDTH, PET_HEIGHT) {
             let mut pb = PathBuilder::new();
             pb.push_rect(r);
-            // Draw foot center cross
             let feet_x = world.x + PET_WIDTH / 2.0;
             let feet_y = world.y + PET_HEIGHT;
             pb.move_to(feet_x - 5.0, feet_y);
@@ -423,10 +546,8 @@ impl SoftbufferSkiaRenderer {
             }
         }
 
-        // 4. Draw Cursor Crosshair if available (Neon Amber/Yellow)
-        if let Some((cur_x, cur_y)) = crate::win32_scanner::WindowScanner::get_cursor_pos() {
-            let cx = cur_x as f32;
-            let cy = cur_y as f32;
+        // 4. Draw Cursor Crosshair
+        if let Some((cx, cy)) = world.cursor_pos {
             let mut stroke_cur = Stroke::default();
             stroke_cur.width = 1.5;
             paint.set_color_rgba8(255, 215, 0, 200);
