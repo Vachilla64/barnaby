@@ -1,15 +1,20 @@
+use std::collections::HashSet;
 use std::ffi::c_void;
 use std::mem::size_of;
-use windows::core::{w, PCWSTR};
+use windows::core::{w, GUID, PCWSTR};
 use windows::Win32::Foundation::{BOOL, HWND, LPARAM, POINT, RECT};
 use windows::Win32::Graphics::Dwm::{
     DwmGetWindowAttribute, DWMWA_CLOAKED, DWMWA_EXTENDED_FRAME_BOUNDS,
 };
 use windows::Win32::Graphics::Gdi::ClientToScreen;
+use windows::Win32::System::Com::{
+    CoCreateInstance, CoInitializeEx, CLSCTX_ALL, COINIT_APARTMENTTHREADED,
+};
 use windows::Win32::System::SystemInformation::GetTickCount64;
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINFO};
 use windows::Win32::UI::Shell::{
     SHAppBarMessage, ABM_GETSTATE, ABM_GETTASKBARPOS, APPBARDATA,
+    IVirtualDesktopManager, VirtualDesktopManager,
 };
 use windows::Win32::UI::WindowsAndMessaging::{
     EnumWindows, FindWindowW, GetCursorPos, GetForegroundWindow,
@@ -17,6 +22,12 @@ use windows::Win32::UI::WindowsAndMessaging::{
     IsIconic, IsWindowVisible, SetWindowPos, GWL_EXSTYLE, GUITHREADINFO,
     SET_WINDOW_POS_FLAGS, SWP_NOACTIVATE, SWP_NOSIZE, SWP_NOZORDER, WS_EX_TOOLWINDOW,
 };
+
+#[link(name = "winmm")]
+extern "system" {
+    pub fn timeBeginPeriod(uPeriod: u32) -> u32;
+    pub fn timeEndPeriod(uPeriod: u32) -> u32;
+}
 
 /// Represents the geometric bounds and metadata of a detected top-level OS window.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -62,23 +73,37 @@ struct EnumContext<'a> {
     windows: &'a mut Vec<ScannedWindow>,
 }
 
-/// Win32 Desktop Scanner and Active Manipulation Manager
+/// Win32 Desktop Scanner, Virtual Desktop Tracker, and Active Manipulation Manager
 pub struct WindowScanner {
     own_hwnd: Option<HWND>,
     screen_x: i32,
     screen_y: i32,
     screen_w: i32,
     screen_h: i32,
+    vdm: Option<IVirtualDesktopManager>,
+    last_desktop_id: Option<GUID>,
+    last_uncloaked_hwnds: HashSet<isize>,
 }
 
 impl WindowScanner {
     pub fn new(screen_x: i32, screen_y: i32, screen_w: i32, screen_h: i32) -> Self {
+        // Initialize COM for virtual desktop manager
+        unsafe {
+            let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
+        }
+        let vdm: Option<IVirtualDesktopManager> = unsafe {
+            CoCreateInstance(&VirtualDesktopManager, None, CLSCTX_ALL).ok()
+        };
+
         Self {
             own_hwnd: None,
             screen_x,
             screen_y,
             screen_w,
             screen_h,
+            vdm,
+            last_desktop_id: None,
+            last_uncloaked_hwnds: HashSet::new(),
         }
     }
 
@@ -92,6 +117,99 @@ impl WindowScanner {
     /// Set our own overlay window HWND so it gets excluded from collision detection and platform extraction.
     pub fn set_own_hwnd(&mut self, hwnd: isize) {
         self.own_hwnd = Some(HWND(hwnd as *mut c_void));
+    }
+
+    /// Fast 60Hz query for a specific window's bounds without full EnumWindows overhead.
+    /// Used for buttery-smooth window-riding physics.
+    pub fn get_window_bounds_fast(hwnd: isize) -> Option<WindowBounds> {
+        unsafe {
+            let target = HWND(hwnd as *mut c_void);
+            if !IsWindowVisible(target).as_bool() || IsIconic(target).as_bool() {
+                return None;
+            }
+
+            // Check if window is cloaked (e.g. moved to another virtual desktop)
+            let mut cloaked: u32 = 0;
+            let cloaked_res = DwmGetWindowAttribute(
+                target,
+                DWMWA_CLOAKED,
+                &mut cloaked as *mut _ as *mut c_void,
+                size_of::<u32>() as u32,
+            );
+            if cloaked_res.is_ok() && cloaked != 0 {
+                return None;
+            }
+
+            let mut frame_rect = RECT::default();
+            let res = DwmGetWindowAttribute(
+                target,
+                DWMWA_EXTENDED_FRAME_BOUNDS,
+                &mut frame_rect as *mut _ as *mut c_void,
+                size_of::<RECT>() as u32,
+            );
+            if res.is_ok() {
+                Some(WindowBounds {
+                    left: frame_rect.left,
+                    top: frame_rect.top,
+                    right: frame_rect.right,
+                    bottom: frame_rect.bottom,
+                })
+            } else {
+                let mut rect = RECT::default();
+                if GetWindowRect(target, &mut rect).is_ok() {
+                    Some(WindowBounds {
+                        left: rect.left,
+                        top: rect.top,
+                        right: rect.right,
+                        bottom: rect.bottom,
+                    })
+                } else {
+                    None
+                }
+            }
+        }
+    }
+
+    /// Checks if the user just switched between Windows 11 Virtual Desktops.
+    /// Returns `true` exactly on the transition frame so the pet can poke out and leap into the new desktop!
+    pub fn check_virtual_desktop_switch(&mut self, scanned: &[ScannedWindow]) -> bool {
+        let mut switched = false;
+
+        // Method 1: IVirtualDesktopManager GUID check on active foreground window
+        if let Some(vdm) = &self.vdm {
+            let fg = unsafe { GetForegroundWindow() };
+            if !fg.0.is_null() {
+                if let Ok(guid) = unsafe { vdm.GetWindowDesktopId(fg) } {
+                    if guid != GUID::zeroed() {
+                        if let Some(last_id) = self.last_desktop_id {
+                            if last_id != guid {
+                                switched = true;
+                            }
+                        }
+                        self.last_desktop_id = Some(guid);
+                    }
+                }
+            }
+        }
+
+        // Method 2: Wholesale uncloaked window set transition detection
+        // When switching virtual desktops, the set of visible uncloaked HWNDs changes completely.
+        let current_hwnds: HashSet<isize> = scanned
+            .iter()
+            .filter(|w| !w.is_taskbar && !w.is_fullscreen)
+            .map(|w| w.hwnd)
+            .collect();
+
+        if !self.last_uncloaked_hwnds.is_empty() && !current_hwnds.is_empty() {
+            let common_count = self.last_uncloaked_hwnds.intersection(&current_hwnds).count();
+            // If less than 20% of previous uncloaked windows are present in the new set, a desktop switch occurred!
+            if common_count == 0 && (self.last_uncloaked_hwnds.len() >= 2 || current_hwnds.len() >= 2) {
+                switched = true;
+            }
+        }
+
+        self.last_uncloaked_hwnds = current_hwnds;
+        switched
     }
 
     /// Perform a full scan of all visible, cloaked-filtered top-level windows in top-to-bottom Z-order.
@@ -116,12 +234,8 @@ impl WindowScanner {
             );
         }
 
-        // Check if the foreground window is fullscreen.
-        // If an active app is fullscreen (e.g. game, video, or maximized borderless app),
-        // the taskbar is suppressed/occluded.
         let foreground_is_fullscreen = scanned.iter().any(|w| w.is_active && w.is_fullscreen);
 
-        // 2. Scan and append the Windows 11 Taskbar ONLY if it is truly active and visible
         if !foreground_is_fullscreen {
             if let Some(taskbar) = Self::scan_taskbar(self.screen_h) {
                 scanned.push(taskbar);
@@ -134,19 +248,16 @@ impl WindowScanner {
     unsafe extern "system" fn enum_windows_proc(hwnd: HWND, lparam: LPARAM) -> BOOL {
         let data = &mut *(lparam.0 as *mut EnumContext);
 
-        // Filter 1: Ignore our own overlay window
         if let Some(own) = data.own_hwnd {
             if hwnd == own {
                 return BOOL(1);
             }
         }
 
-        // Filter 2: Must be visible and not minimized (IsIconic)
         if !IsWindowVisible(hwnd).as_bool() || IsIconic(hwnd).as_bool() {
             return BOOL(1);
         }
 
-        // Filter 3: Check DWMWA_CLOAKED (filters out suspended UWP apps, virtual desktop leftovers, hidden shell frames)
         let mut cloaked: u32 = 0;
         let res = DwmGetWindowAttribute(
             hwnd,
@@ -158,14 +269,11 @@ impl WindowScanner {
             return BOOL(1);
         }
 
-        // Filter 4: Check WS_EX_TOOLWINDOW (floating tooltips, tray flyouts, invisible helper windows)
         let ex_style = GetWindowLongW(hwnd, GWL_EXSTYLE) as u32;
         if (ex_style & WS_EX_TOOLWINDOW.0) != 0 {
             return BOOL(1);
         }
 
-        // Filter 5: Query DWMWA_EXTENDED_FRAME_BOUNDS instead of GetWindowRect
-        // to discard the 7-pixel invisible Windows 11 drop shadow margin.
         let mut frame_rect = RECT::default();
         let frame_res = DwmGetWindowAttribute(
             hwnd,
@@ -194,19 +302,15 @@ impl WindowScanner {
             }
         };
 
-        // Filter 6: Ignore windows with zero or tiny dimensions
         if bounds.width() <= 16 || bounds.height() <= 16 {
             return BOOL(1);
         }
 
-        // Detect if window is FULLSCREEN (covers entire screen bounds)
-        // When a window is fullscreen, its top edge is at y <= 0 and should NOT be a platform collider!
         let is_fullscreen = bounds.left <= data.screen_x + 8
             && bounds.top <= data.screen_y + 8
             && bounds.right >= data.screen_x + data.screen_w - 8
             && bounds.bottom >= data.screen_y + data.screen_h - 8;
 
-        // Extract window title
         let mut title_buf = [0u16; 512];
         let len = GetWindowTextW(hwnd, &mut title_buf);
         let title = if len > 0 {
@@ -241,7 +345,6 @@ impl WindowScanner {
                 return None;
             }
 
-            // Check if taskbar is cloaked
             let mut cloaked: u32 = 0;
             let cloaked_res = DwmGetWindowAttribute(
                 hwnd,
@@ -253,17 +356,14 @@ impl WindowScanner {
                 return None;
             }
 
-            // Check if Auto-Hide is enabled on the taskbar
             let mut app_bar_data = APPBARDATA {
                 cbSize: size_of::<APPBARDATA>() as u32,
                 hWnd: hwnd,
                 ..Default::default()
             };
             let state = SHAppBarMessage(ABM_GETSTATE, &mut app_bar_data);
-            // ABS_AUTOHIDE = 0x01
             let is_autohide = (state as u32 & 0x01) != 0;
 
-            // Query true position from SHAppBarMessage
             let mut pos_data = APPBARDATA {
                 cbSize: size_of::<APPBARDATA>() as u32,
                 hWnd: hwnd,
@@ -307,9 +407,7 @@ impl WindowScanner {
                 }
             };
 
-            // If the taskbar is auto-hidden or retracted, its top edge is offscreen or height <= 6
             if is_autohide || bounds.height() <= 6 || bounds.top >= screen_height - 6 {
-                // Taskbar is retracted or in autohide, so it shouldn't form a standing platform!
                 return None;
             }
 
@@ -344,7 +442,6 @@ impl WindowScanner {
                 ..Default::default()
             };
 
-            // 0 indicates foreground thread
             if GetGUIThreadInfo(0, &mut info).is_ok() {
                 if !info.hwndCaret.0.is_null() {
                     let mut pt = POINT {
@@ -360,7 +457,7 @@ impl WindowScanner {
         }
     }
 
-    /// Returns how long (in milliseconds) the user has been idle (no keyboard/mouse input).
+    /// Returns how long (in milliseconds) the user has been idle.
     pub fn check_user_idle_ms() -> u64 {
         unsafe {
             let mut last_input = LASTINPUTINFO {

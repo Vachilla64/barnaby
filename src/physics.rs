@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::time::Instant;
-use crate::win32_scanner::ScannedWindow;
+use crate::win32_scanner::{ScannedWindow, WindowScanner};
 
 pub const PET_WIDTH: f32 = 48.0;
 pub const PET_HEIGHT: f32 = 48.0;
@@ -47,6 +47,7 @@ pub enum PetAction {
     Petted { timer: f32 },
     Backflipping { progress: f32 },
     Eating { timer: f32 },
+    PeekingFromScreenEdge { timer: f32 },
     DraggedByUser { grab_offset_x: f32, grab_offset_y: f32 },
     PeekingBehindWindow { hwnd: isize, timer: f32 },
     PushingWindow { hwnd: isize, dir: f32, timer: f32 },
@@ -80,49 +81,35 @@ pub struct Particle {
 
 /// The complete simulated world and pet entity state
 pub struct WorldState {
-    // Spatial dimensions
     pub screen_width: f32,
     pub screen_height: f32,
 
-    // Pet position & physics
     pub x: f32,
     pub y: f32,
     pub vx: f32,
     pub vy: f32,
     pub facing_right: bool,
-    pub rotation_rad: f32, // For backflips and acrobatics
+    pub rotation_rad: f32,
 
-    // State machine
     pub state_kind: PetStateKind,
     pub action: PetAction,
     pub anim_timer: f32,
 
-    // Window-riding state
     pub standing_on: Option<isize>,
     pub last_standing_window_pos: Option<(i32, i32)>,
 
-    // Cursor tracking & petting interaction
     pub cursor_pos: Option<(f32, f32)>,
     pub petting_meter: f32,
     pub last_cursor_pos: Option<(f32, f32)>,
 
-    // Mouse drag velocity estimation
     pub drag_history: Vec<(f32, f32, Instant)>,
-
-    // Particles (hearts, sparkles, zzz, treats)
     pub particles: Vec<Particle>,
-
-    // Active treat entity being chased
     pub active_treat: Option<(f32, f32)>,
 
-    // Speech and debug state
     pub active_speech: Option<SpeechBubble>,
     pub debug_draw_platforms: bool,
-
-    // Current navigation target
     pub nav_target_x: Option<f32>,
 
-    // Platforms and windows cached for collision & rendering
     pub platforms: Vec<PlatformSegment>,
     pub scanned_windows: Vec<ScannedWindow>,
 }
@@ -161,63 +148,49 @@ impl WorldState {
     }
 
     /// Extract exposed horizontal top-edge platform segments from scanned windows.
-    /// Excludes fullscreen windows so the pet doesn't stand on offscreen/top margins.
     pub fn update_platforms(&mut self, windows: Vec<ScannedWindow>) {
         let mut platforms = Vec::new();
 
-        // 1. Process application windows in top-to-bottom Z-order
         for i in 0..windows.len() {
             let win = &windows[i];
 
-            // CRITICAL: Ignore fullscreen windows for collisions
-            // (Fullscreen apps/games/videos cover the whole screen and shouldn't create top-edge platforms)
             if win.is_fullscreen {
                 continue;
             }
 
             let top_y = win.bounds.top as f32;
-
-            // Start with initial top edge span [left, right]
             let mut intervals: Vec<(f32, f32)> = vec![(win.bounds.left as f32, win.bounds.right as f32)];
 
-            // Subtract occlusion from every window j higher in the Z-order (j < i)
             for j in 0..i {
                 let higher = &windows[j];
-                // Check if the higher window vertically covers the top edge of window i
                 if higher.bounds.top <= win.bounds.top && higher.bounds.bottom >= win.bounds.top {
                     let occ_left = higher.bounds.left as f32;
                     let occ_right = higher.bounds.right as f32;
 
                     let mut next_intervals = Vec::with_capacity(intervals.len() * 2);
                     for (seg_left, seg_right) in intervals {
-                        // Case A: Higher window completely covers segment -> eliminate
                         if occ_left <= seg_left && occ_right >= seg_right {
                             continue;
                         }
-                        // Case B: Higher window punches hole in middle -> split into two
                         if occ_left > seg_left && occ_right < seg_right {
                             next_intervals.push((seg_left, occ_left));
                             next_intervals.push((occ_right, seg_right));
                             continue;
                         }
-                        // Case C: Overlaps left portion
                         if occ_left <= seg_left && occ_right > seg_left && occ_right < seg_right {
                             next_intervals.push((occ_right, seg_right));
                             continue;
                         }
-                        // Case D: Overlaps right portion
                         if occ_left > seg_left && occ_left < seg_right && occ_right >= seg_right {
                             next_intervals.push((seg_left, occ_left));
                             continue;
                         }
-                        // No overlap
                         next_intervals.push((seg_left, seg_right));
                     }
                     intervals = next_intervals;
                 }
             }
 
-            // Keep segments with walkable width >= 24px
             for (seg_x1, seg_x2) in intervals {
                 if seg_x2 - seg_x1 >= 24.0 {
                     platforms.push(PlatformSegment {
@@ -231,9 +204,7 @@ impl WorldState {
             }
         }
 
-        // 2. Add true ground floor at the very bottom of the display (self.screen_height)
-        // If taskbar was detected and active, its top edge was added above.
-        // If taskbar is hidden, auto-hidden, or covered, the true bottom of the screen is used!
+        // True screen floor
         platforms.push(PlatformSegment {
             x1: 0.0,
             x2: self.screen_width,
@@ -246,21 +217,35 @@ impl WorldState {
         self.scanned_windows = windows;
     }
 
+    /// Triggers the desktop traversal sequence: peeks from the left edge and leaps into the new desktop!
+    pub fn trigger_desktop_traversal(&mut self) {
+        self.wake_up();
+        // Place pet poking out from the left screen bezel
+        self.x = -PET_WIDTH * 0.65;
+        self.y = (self.screen_height * 0.62).clamp(150.0, self.screen_height - 120.0);
+        self.vx = 0.0;
+        self.vy = 0.0;
+        self.rotation_rad = 0.0;
+        self.facing_right = true;
+        self.standing_on = None;
+        self.last_standing_window_pos = None;
+        self.state_kind = PetStateKind::PeekingBehindWindow;
+        self.action = PetAction::PeekingFromScreenEdge { timer: 0.85 };
+        self.say("Wait for me! *pokes out* 🐾".to_string(), 2500);
+        self.spawn_sparkle_burst(0.0, self.y + PET_HEIGHT / 2.0);
+    }
+
     /// Advance physics, collision, particles, and animation state by `dt` seconds.
     pub fn tick(&mut self, dt: f32) {
         self.anim_timer += dt;
 
-        // Clean up expired speech bubbles
         if let Some(speech) = &self.active_speech {
             if Instant::now() > speech.expires_at {
                 self.active_speech = None;
             }
         }
 
-        // Update particles
         self.tick_particles(dt);
-
-        // Decay petting meter when not actively stroked
         self.petting_meter = (self.petting_meter - dt * 2.0).max(0.0);
 
         // 1. Handle Active Dragging by User
@@ -285,11 +270,11 @@ impl WorldState {
             return;
         }
 
-        // 2. Handle Riding Moving Windows
+        // 2. High-Frequency 60Hz Window Riding (smooth real-time tracking)
         if let Some(hwnd) = self.standing_on {
             if hwnd != 0 {
-                if let Some(win) = self.scanned_windows.iter().find(|w| w.hwnd == hwnd) {
-                    let cur_pos = (win.bounds.left, win.bounds.top);
+                if let Some(bounds) = WindowScanner::get_window_bounds_fast(hwnd) {
+                    let cur_pos = (bounds.left, bounds.top);
                     if let Some(old_pos) = self.last_standing_window_pos {
                         let dx = (cur_pos.0 - old_pos.0) as f32;
                         let dy = (cur_pos.1 - old_pos.1) as f32;
@@ -301,17 +286,19 @@ impl WorldState {
                     }
                     self.last_standing_window_pos = Some(cur_pos);
 
+                    // Check if pet walked off the platform
                     let feet_x = self.x + PET_WIDTH / 2.0;
-                    let is_still_on_platform = self.platforms.iter().any(|p| {
-                        p.hwnd == hwnd && feet_x >= p.x1 - 4.0 && feet_x <= p.x2 + 4.0 && (self.y + PET_HEIGHT - p.y).abs() < 12.0
-                    });
-
-                    if !is_still_on_platform {
+                    let feet_y = self.y + PET_HEIGHT;
+                    if feet_x < (bounds.left as f32 - 12.0)
+                        || feet_x > (bounds.right as f32 + 12.0)
+                        || (feet_y - bounds.top as f32).abs() > 16.0
+                    {
                         self.standing_on = None;
                         self.last_standing_window_pos = None;
                         self.transition_to_falling();
                     }
                 } else {
+                    // Window was closed, minimized, or moved to another virtual desktop
                     self.standing_on = None;
                     self.last_standing_window_pos = None;
                     self.transition_to_falling();
@@ -321,12 +308,30 @@ impl WorldState {
 
         // 3. State Machine Logic & AI Behaviors
         match self.action {
+            PetAction::PeekingFromScreenEdge { mut timer } => {
+                self.vx = 0.0;
+                self.vy = 0.0;
+                self.rotation_rad = 0.0;
+                timer -= dt;
+
+                if timer <= 0.0 {
+                    // Leap from edge into the new desktop!
+                    self.vx = 340.0;
+                    self.vy = -440.0;
+                    self.state_kind = PetStateKind::Backflipping;
+                    self.action = PetAction::Backflipping { progress: 0.0 };
+                    self.spawn_sparkle_burst(self.x + PET_WIDTH, self.y + PET_HEIGHT / 2.0);
+                    self.say("Here I am! ✨".to_string(), 2500);
+                } else {
+                    self.action = PetAction::PeekingFromScreenEdge { timer };
+                }
+            }
+
             PetAction::Idle { mut timer } => {
                 self.vx = 0.0;
                 self.rotation_rad = 0.0;
                 timer -= dt;
 
-                // If a treat is placed on screen, go chase it!
                 if let Some((tx, _ty)) = self.active_treat {
                     let diff = tx - (self.x + PET_WIDTH / 2.0);
                     let dir = if diff > 0.0 { 1.0 } else { -1.0 };
@@ -369,7 +374,6 @@ impl WorldState {
             PetAction::Sleeping => {
                 self.vx = 0.0;
                 self.rotation_rad = 0.0;
-                // Emit floating Zzz particles periodically
                 if (self.anim_timer * 1.5).fract() < dt * 1.5 {
                     self.spawn_zzz();
                 }
@@ -378,7 +382,6 @@ impl WorldState {
             PetAction::Petted { mut timer } => {
                 self.vx = 0.0;
                 timer -= dt;
-                // Emit heart particles while being stroked
                 if (self.anim_timer * 8.0).fract() < dt * 8.0 {
                     self.spawn_heart();
                 }
@@ -418,11 +421,9 @@ impl WorldState {
             PetAction::Walking { mut dir, mut timer } => {
                 self.rotation_rad = 0.0;
 
-                // Steer towards active treat if present
                 if let Some((tx, _ty)) = self.active_treat {
                     let diff = tx - (self.x + PET_WIDTH / 2.0);
                     if diff.abs() < 12.0 {
-                        // Reached treat! Eat it
                         self.action = PetAction::Eating { timer: 1.5 };
                         self.state_kind = PetStateKind::Eating;
                         self.spawn_sparkle_burst(self.x + PET_WIDTH / 2.0, self.y + PET_HEIGHT / 2.0);
@@ -445,7 +446,6 @@ impl WorldState {
                 self.facing_right = dir > 0.0;
                 timer -= dt;
 
-                // Edge patrol: turn around if nearing platform cliff (unless chasing treat)
                 let feet_x = self.x + PET_WIDTH / 2.0;
                 let lookahead_x = feet_x + dir * (PET_WIDTH / 2.0 + 8.0);
                 let on_edge = !self.platforms.iter().any(|p| {
@@ -515,12 +515,15 @@ impl WorldState {
         self.x += self.vx * dt;
         self.y += self.vy * dt;
 
-        if self.x < 0.0 {
-            self.x = 0.0;
-            self.vx = 0.0;
-        } else if self.x + PET_WIDTH > self.screen_width {
-            self.x = self.screen_width - PET_WIDTH;
-            self.vx = 0.0;
+        // Keep pet within screen bounds (unless peeking from left edge)
+        if !matches!(self.action, PetAction::PeekingFromScreenEdge { .. }) {
+            if self.x < 0.0 {
+                self.x = 0.0;
+                self.vx = 0.0;
+            } else if self.x + PET_WIDTH > self.screen_width {
+                self.x = self.screen_width - PET_WIDTH;
+                self.vx = 0.0;
+            }
         }
 
         // 5. Platform Landing & Ground Collision
@@ -528,7 +531,7 @@ impl WorldState {
         let new_feet_y = self.y + PET_HEIGHT;
         let feet_x = self.x + PET_WIDTH / 2.0;
 
-        if self.vy >= 0.0 {
+        if self.vy >= 0.0 && !matches!(self.action, PetAction::PeekingFromScreenEdge { .. }) {
             let mut landed_platform = None;
 
             for platform in &self.platforms {
@@ -545,8 +548,8 @@ impl WorldState {
                 self.vy = 0.0;
                 self.standing_on = Some(p.hwnd);
 
-                if let Some(win) = self.scanned_windows.iter().find(|w| w.hwnd == p.hwnd) {
-                    self.last_standing_window_pos = Some((win.bounds.left, win.bounds.top));
+                if let Some(bounds) = WindowScanner::get_window_bounds_fast(p.hwnd) {
+                    self.last_standing_window_pos = Some((bounds.left, bounds.top));
                 }
 
                 if self.state_kind == PetStateKind::Falling || self.state_kind == PetStateKind::Jumping {
@@ -560,14 +563,12 @@ impl WorldState {
         }
     }
 
-    /// Advance particle animations
     fn tick_particles(&mut self, dt: f32) {
         for p in &mut self.particles {
             p.x += p.vx * dt;
             p.y += p.vy * dt;
             p.lifetime -= dt;
 
-            // Apply gravity to treats
             if matches!(p.particle_type, ParticleType::Treat) {
                 p.vy += 600.0 * dt;
                 if p.y >= self.screen_height - 10.0 {
@@ -584,6 +585,7 @@ impl WorldState {
         if self.state_kind != PetStateKind::Falling
             && self.state_kind != PetStateKind::DraggedByUser
             && self.state_kind != PetStateKind::Backflipping
+            && !matches!(self.action, PetAction::PeekingFromScreenEdge { .. })
         {
             self.state_kind = PetStateKind::Falling;
             self.action = PetAction::Falling;
@@ -592,7 +594,6 @@ impl WorldState {
         }
     }
 
-    /// Interactively stroke or pet the character by moving cursor over it
     pub fn pet_by_cursor(&mut self, cursor_x: f32, cursor_y: f32) {
         if let Some((last_x, last_y)) = self.last_cursor_pos {
             let dist = ((cursor_x - last_x).powi(2) + (cursor_y - last_y).powi(2)).sqrt();
@@ -612,17 +613,15 @@ impl WorldState {
         self.last_cursor_pos = Some((cursor_x, cursor_y));
     }
 
-    /// Single click poke reaction
     pub fn handle_single_click(&mut self) {
         self.wake_up();
-        self.vy = -180.0; // Happy little hop
+        self.vy = -180.0;
         self.spawn_sparkle_burst(self.x + PET_WIDTH / 2.0, self.y + PET_HEIGHT / 2.0);
         let replies = ["Boop! ✨", "Hello friend! 😊", "Ready to explore!", "Peekaboo! 👀"];
         let idx = (self.anim_timer * 7.0) as usize % replies.len();
         self.say(replies[idx].to_string(), 2200);
     }
 
-    /// Double click acrobatic trick (backflip)
     pub fn handle_double_click(&mut self) {
         self.wake_up();
         self.vy = -450.0;
@@ -634,7 +633,6 @@ impl WorldState {
         self.say("Ta-da! Acrobatics! 🤸✨".to_string(), 2500);
     }
 
-    /// Right click treat toss (food interaction)
     pub fn toss_treat(&mut self, cursor_x: f32, cursor_y: f32) {
         self.wake_up();
         self.active_treat = Some((cursor_x, cursor_y));
@@ -651,7 +649,6 @@ impl WorldState {
         self.say("Ooh, a treat! Mine mine! 🍓".to_string(), 2500);
     }
 
-    /// Sleep when idle
     pub fn handle_user_idle(&mut self, idle_ms: u64) {
         if idle_ms > 60000 && self.state_kind == PetStateKind::Idle {
             self.state_kind = PetStateKind::Sleeping;
@@ -659,7 +656,6 @@ impl WorldState {
         }
     }
 
-    /// Wake up if sleeping
     pub fn wake_up(&mut self) {
         if self.state_kind == PetStateKind::Sleeping {
             self.state_kind = PetStateKind::Idle;
@@ -667,8 +663,6 @@ impl WorldState {
             self.say("Yawn... I'm awake! ☀️".to_string(), 2500);
         }
     }
-
-    // --- Particle Spawners ---
 
     pub fn spawn_heart(&mut self) {
         let center_x = self.x + PET_WIDTH / 2.0;
@@ -725,7 +719,6 @@ impl WorldState {
         }
     }
 
-    /// User starts dragging the pet
     pub fn start_drag(&mut self, cursor_x: f32, cursor_y: f32) {
         self.wake_up();
         let grab_offset_x = cursor_x - self.x;
@@ -738,7 +731,6 @@ impl WorldState {
         self.drag_history.push((self.x, self.y, Instant::now()));
     }
 
-    /// User releases the pet; calculate release velocity and throw!
     pub fn release_drag(&mut self) {
         if let PetAction::DraggedByUser { .. } = self.action {
             let mut throw_vx = 0.0;
@@ -764,7 +756,6 @@ impl WorldState {
         }
     }
 
-    /// Jump directly towards a point (x, y)
     pub fn jump_to_point(&mut self, target_x: f32, target_y: f32) {
         self.wake_up();
         let dx = target_x - (self.x + PET_WIDTH / 2.0);
@@ -779,7 +770,6 @@ impl WorldState {
         self.action = PetAction::Jumping;
     }
 
-    /// Walk to a specific window matching title substring
     pub fn walk_to_window(&mut self, title_contains: &str) -> bool {
         self.wake_up();
         let title_lower = title_contains.to_lowercase();
@@ -802,7 +792,6 @@ impl WorldState {
         }
     }
 
-    /// Speak a message in a speech bubble
     pub fn say(&mut self, text: String, duration_ms: u64) {
         self.active_speech = Some(SpeechBubble {
             text,
@@ -810,7 +799,6 @@ impl WorldState {
         });
     }
 
-    /// Check if cursor intersects the pet's interactive bounding box
     pub fn hit_test(&self, cursor_x: f32, cursor_y: f32) -> bool {
         let margin = 6.0;
         cursor_x >= self.x - margin

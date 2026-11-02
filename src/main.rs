@@ -29,7 +29,7 @@ use crate::ipc::{DesktopEvent, DesktopSnapshot, PetCommand, WindowInfoSnapshot};
 use crate::physics::WorldState;
 use crate::renderer::softbuffer_skia::SoftbufferSkiaRenderer;
 use crate::renderer::RenderBackend;
-use crate::win32_scanner::WindowScanner;
+use crate::win32_scanner::{timeBeginPeriod, timeEndPeriod, WindowScanner};
 
 struct DesktopPetApp {
     // Spatial bounds
@@ -339,11 +339,9 @@ impl ApplicationHandler for DesktopPetApp {
                             if self.world.hit_test(rel_x, rel_y) {
                                 let now = Instant::now();
                                 if now.duration_since(self.last_click_time).as_millis() < 350 {
-                                    // Double click: acrobatic backflip trick!
                                     self.world.handle_double_click();
                                     self.last_click_time = now - Duration::from_secs(1);
                                 } else {
-                                    // Single click poke + start drag
                                     self.world.handle_single_click();
                                     self.world.start_drag(rel_x, rel_y);
                                     self.last_click_time = now;
@@ -363,7 +361,6 @@ impl ApplicationHandler for DesktopPetApp {
                         }
 
                         (MouseButton::Right, ElementState::Pressed) => {
-                            // Right click: toss a delicious treat for the pet to chase and eat!
                             self.world.toss_treat(rel_x, rel_y);
                         }
 
@@ -380,6 +377,7 @@ impl ApplicationHandler for DesktopPetApp {
 
             WindowEvent::CloseRequested => {
                 info!("Desktop Pet engine exiting...");
+                unsafe { timeEndPeriod(1) };
                 std::process::exit(0);
             }
 
@@ -391,16 +389,23 @@ impl ApplicationHandler for DesktopPetApp {
         let now = Instant::now();
         let dt = now.duration_since(self.last_tick).as_secs_f32().min(0.05);
 
+        // Run buttery-smooth 60Hz physics, animation, and dynamic hit-testing loop
         if dt >= 1.0 / 60.0 {
             self.last_tick = now;
 
             // 1. Process agent IPC commands
             self.process_ipc_commands();
 
-            // 2. Run 10Hz Win32 window scanner
+            // 2. Window scanner & Virtual Desktop Traversal check
             if now.duration_since(self.last_scan).as_millis() >= 100 {
                 self.last_scan = now;
                 let scanned = self.scanner.scan_windows();
+
+                // Check if user swiped to a different Windows 11 Virtual Desktop!
+                if self.scanner.check_virtual_desktop_switch(&scanned) {
+                    info!("Windows 11 Virtual Desktop switch detected! Pet traversing to new desktop...");
+                    self.world.trigger_desktop_traversal();
+                }
 
                 let fg_title = WindowScanner::get_foreground_window_title();
                 if fg_title != self.last_foreground_title && !fg_title.is_empty() {
@@ -412,15 +417,13 @@ impl ApplicationHandler for DesktopPetApp {
                     });
                 }
 
-                // Check user idle ms
                 let idle_ms = WindowScanner::check_user_idle_ms();
                 self.world.handle_user_idle(idle_ms);
 
-                // Update walkable platforms with fullscreen exclusions & Z-order occlusion subtraction
                 self.world.update_platforms(scanned);
             }
 
-            // 3. Advance physics, platform collisions, particles, and window riding
+            // 3. Advance physics (includes instant 60Hz window-riding!)
             let prev_standing = self.world.standing_on;
             self.world.tick(dt);
 
@@ -432,7 +435,7 @@ impl ApplicationHandler for DesktopPetApp {
                 let _ = self.event_tx.send(DesktopEvent::PetLandedOnWindow { hwnd, title });
             }
 
-            // 4. Update dynamic hit-testing (click-through toggle & petting detection)
+            // 4. Update dynamic hit-testing & petting detection
             self.update_dynamic_hit_testing();
 
             // 5. Broadcast snapshot to REST/WebSocket
@@ -443,6 +446,7 @@ impl ApplicationHandler for DesktopPetApp {
             }
         }
 
+        // Sub-millisecond timer resolution enabled by timeBeginPeriod(1)
         event_loop.set_control_flow(ControlFlow::WaitUntil(Instant::now() + Duration::from_millis(16)));
     }
 }
@@ -454,6 +458,9 @@ fn main() {
         .init();
 
     info!("Starting Windows 11 Desktop Pet Interactivity Engine...");
+
+    // Bump Windows scheduler resolution from default 15.6ms to 1ms for rock-solid 60 FPS
+    unsafe { timeBeginPeriod(1) };
 
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
@@ -485,6 +492,7 @@ fn main() {
         Ok(el) => el,
         Err(e) => {
             error!("Failed to create Winit event loop: {e}");
+            unsafe { timeEndPeriod(1) };
             return;
         }
     };
@@ -493,4 +501,6 @@ fn main() {
     if let Err(e) = event_loop.run_app(&mut app) {
         error!("Event loop error: {e}");
     }
+
+    unsafe { timeEndPeriod(1) };
 }
