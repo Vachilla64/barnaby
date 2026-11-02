@@ -2,7 +2,7 @@
 
 use serde::{Deserialize, Serialize};
 use std::time::Instant;
-use crate::win32_scanner::{ScannedWindow, WindowScanner};
+use crate::win32_scanner::{DesktopSwipeDirection, ScannedWindow, WindowScanner};
 
 pub const PET_WIDTH: f32 = 48.0;
 pub const PET_HEIGHT: f32 = 48.0;
@@ -47,7 +47,7 @@ pub enum PetAction {
     Petted { timer: f32 },
     Backflipping { progress: f32 },
     Eating { timer: f32 },
-    PeekingFromScreenEdge { timer: f32 },
+    PeekingFromScreenEdge { timer: f32, direction: DesktopSwipeDirection },
     DraggedByUser { grab_offset_x: f32, grab_offset_y: f32 },
     PeekingBehindWindow { hwnd: isize, timer: f32 },
     PushingWindow { hwnd: isize, dir: f32, timer: f32 },
@@ -217,22 +217,34 @@ impl WorldState {
         self.scanned_windows = windows;
     }
 
-    /// Triggers the desktop traversal sequence: peeks from the left edge and leaps into the new desktop!
-    pub fn trigger_desktop_traversal(&mut self) {
+    /// Triggers the desktop traversal sequence: peeks from the left or right edge and leaps into the new desktop!
+    pub fn trigger_desktop_traversal(&mut self, direction: DesktopSwipeDirection) {
         self.wake_up();
-        // Place pet poking out from the left screen bezel
-        self.x = -PET_WIDTH * 0.65;
         self.y = (self.screen_height * 0.62).clamp(150.0, self.screen_height - 120.0);
         self.vx = 0.0;
         self.vy = 0.0;
         self.rotation_rad = 0.0;
-        self.facing_right = true;
         self.standing_on = None;
         self.last_standing_window_pos = None;
         self.state_kind = PetStateKind::PeekingBehindWindow;
-        self.action = PetAction::PeekingFromScreenEdge { timer: 0.85 };
+        self.action = PetAction::PeekingFromScreenEdge { timer: 0.85, direction };
+
+        match direction {
+            DesktopSwipeDirection::Left => {
+                // Swiped to desktop on the left -> pet emerges from the RIGHT screen edge
+                self.x = self.screen_width - PET_WIDTH * 0.35;
+                self.facing_right = false;
+                self.spawn_sparkle_burst(self.screen_width, self.y + PET_HEIGHT / 2.0);
+            }
+            DesktopSwipeDirection::Right => {
+                // Swiped to desktop on the right -> pet emerges from the LEFT screen edge
+                self.x = -PET_WIDTH * 0.65;
+                self.facing_right = true;
+                self.spawn_sparkle_burst(0.0, self.y + PET_HEIGHT / 2.0);
+            }
+        }
+
         self.say("Wait for me! *pokes out* 🐾".to_string(), 2500);
-        self.spawn_sparkle_burst(0.0, self.y + PET_HEIGHT / 2.0);
     }
 
     /// Advance physics, collision, particles, and animation state by `dt` seconds.
@@ -308,7 +320,7 @@ impl WorldState {
 
         // 3. State Machine Logic & AI Behaviors
         match self.action {
-            PetAction::PeekingFromScreenEdge { mut timer } => {
+            PetAction::PeekingFromScreenEdge { mut timer, direction } => {
                 self.vx = 0.0;
                 self.vy = 0.0;
                 self.rotation_rad = 0.0;
@@ -316,14 +328,26 @@ impl WorldState {
 
                 if timer <= 0.0 {
                     // Leap from edge into the new desktop!
-                    self.vx = 340.0;
+                    match direction {
+                        DesktopSwipeDirection::Left => {
+                            self.vx = -340.0;
+                            self.facing_right = false;
+                        }
+                        DesktopSwipeDirection::Right => {
+                            self.vx = 340.0;
+                            self.facing_right = true;
+                        }
+                    }
                     self.vy = -440.0;
                     self.state_kind = PetStateKind::Backflipping;
                     self.action = PetAction::Backflipping { progress: 0.0 };
-                    self.spawn_sparkle_burst(self.x + PET_WIDTH, self.y + PET_HEIGHT / 2.0);
+                    self.spawn_sparkle_burst(
+                        if self.facing_right { self.x + PET_WIDTH } else { self.x },
+                        self.y + PET_HEIGHT / 2.0,
+                    );
                     self.say("Here I am! ✨".to_string(), 2500);
                 } else {
-                    self.action = PetAction::PeekingFromScreenEdge { timer };
+                    self.action = PetAction::PeekingFromScreenEdge { timer, direction };
                 }
             }
 
@@ -515,14 +539,18 @@ impl WorldState {
         self.x += self.vx * dt;
         self.y += self.vy * dt;
 
-        // Keep pet within screen bounds (unless peeking from left edge)
+        // Keep pet within screen bounds (unless peeking from screen edge or leaping inwards)
         if !matches!(self.action, PetAction::PeekingFromScreenEdge { .. }) {
             if self.x < 0.0 {
-                self.x = 0.0;
-                self.vx = 0.0;
+                if self.vx <= 0.0 {
+                    self.x = 0.0;
+                    self.vx = 0.0;
+                }
             } else if self.x + PET_WIDTH > self.screen_width {
-                self.x = self.screen_width - PET_WIDTH;
-                self.vx = 0.0;
+                if self.vx >= 0.0 {
+                    self.x = self.screen_width - PET_WIDTH;
+                    self.vx = 0.0;
+                }
             }
         }
 

@@ -402,12 +402,15 @@ impl ApplicationHandler for DesktopPetApp {
                 let scanned = self.scanner.scan_windows();
 
                 // Check if user swiped to a different Windows 11 Virtual Desktop!
-                if let Some(target_guid) = self.scanner.check_virtual_desktop_switch(&scanned) {
-                    info!("Windows 11 Virtual Desktop switch detected! Moving overlay and triggering traversal...");
+                if let Some(event) = self.scanner.check_virtual_desktop_switch(&scanned) {
+                    info!(
+                        "Windows 11 Virtual Desktop switch detected! Direction: {:?}, GUID: {:?}. Moving overlay and triggering traversal...",
+                        event.direction, event.target_guid
+                    );
                     if let Some(own) = self.own_hwnd {
-                        self.scanner.move_overlay_to_desktop(own, target_guid);
+                        self.scanner.move_overlay_to_desktop(own, event.target_guid);
                     }
-                    self.world.trigger_desktop_traversal();
+                    self.world.trigger_desktop_traversal(event.direction);
                     if let Some(window) = &self.window {
                         window.request_redraw();
                     }

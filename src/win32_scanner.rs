@@ -44,6 +44,21 @@ pub fn guid_from_registry_bytes(b: [u8; 16]) -> GUID {
     )
 }
 
+/// Direction the user swiped when changing virtual desktops
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DesktopSwipeDirection {
+    /// Swiped to a desktop on the left -> pet enters from the RIGHT edge
+    Left,
+    /// Swiped to a desktop on the right -> pet enters from the LEFT edge
+    Right,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct VirtualDesktopSwitchEvent {
+    pub target_guid: GUID,
+    pub direction: DesktopSwipeDirection,
+}
+
 /// Represents the geometric bounds and metadata of a detected top-level OS window.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ScannedWindow {
@@ -185,6 +200,46 @@ impl WindowScanner {
         }
     }
 
+    /// Reads the list of all virtual desktop GUIDs in physical left-to-right order from the Windows 11 registry.
+    pub fn get_all_virtual_desktop_ids() -> Vec<[u8; 16]> {
+        unsafe {
+            let mut hkey = HKEY::default();
+            let subkey = w!("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\VirtualDesktops");
+            if RegOpenKeyExW(HKEY_CURRENT_USER, subkey, 0, KEY_READ, &mut hkey).is_err() {
+                return Vec::new();
+            }
+
+            let mut buf = [0u8; 512];
+            let mut buf_size = 512u32;
+            let mut val_type = REG_VALUE_TYPE::default();
+            let val_name = w!("VirtualDesktopIDs");
+
+            let res = RegQueryValueExW(
+                hkey,
+                val_name,
+                None,
+                Some(&mut val_type),
+                Some(buf.as_mut_ptr()),
+                Some(&mut buf_size),
+            );
+
+            let _ = RegCloseKey(hkey);
+
+            if res.is_ok() && buf_size >= 16 {
+                let count = (buf_size / 16) as usize;
+                let mut list = Vec::with_capacity(count);
+                for chunk in buf[..(count * 16)].chunks_exact(16) {
+                    let mut id = [0u8; 16];
+                    id.copy_from_slice(chunk);
+                    list.push(id);
+                }
+                list
+            } else {
+                Vec::new()
+            }
+        }
+    }
+
     /// Reads the canonical Windows 11 Virtual Desktop ID directly from the Windows Explorer registry.
     pub fn get_current_virtual_desktop_id() -> Option<[u8; 16]> {
         unsafe {
@@ -219,8 +274,6 @@ impl WindowScanner {
     }
 
     /// Moves our transparent overlay window to the target virtual desktop.
-    /// Clears DWM_CLOAKED_SHELL so DWM displays our overlay immediately on the destination desktop,
-    /// and re-asserts HWND_TOPMOST without stealing keyboard focus from active apps.
     pub fn move_overlay_to_desktop(&self, hwnd: isize, desktop_id: GUID) -> bool {
         if let Some(vdm) = &self.vdm {
             unsafe {
@@ -231,7 +284,6 @@ impl WindowScanner {
                     return false;
                 }
 
-                // Re-assert topmost and show without stealing focus (SWP_NOACTIVATE | SWP_SHOWWINDOW)
                 let flags: SET_WINDOW_POS_FLAGS = SWP_NOMOVE
                     | SWP_NOSIZE
                     | SWP_NOACTIVATE
@@ -246,24 +298,39 @@ impl WindowScanner {
         false
     }
 
-    /// Checks if the user just switched between Windows 11 Virtual Desktops.
-    /// If switched, returns `Some(target_desktop_guid)` so the caller can call `move_overlay_to_desktop`.
-    pub fn check_virtual_desktop_switch(&mut self, scanned: &[ScannedWindow]) -> Option<GUID> {
+    /// Checks if the user just switched between Windows 11 Virtual Desktops, and computes
+    /// the physical swipe direction (`Left` or `Right`) based on the left-to-right desktop order.
+    pub fn check_virtual_desktop_switch(&mut self, scanned: &[ScannedWindow]) -> Option<VirtualDesktopSwitchEvent> {
         let mut target_guid = None;
+        let mut direction = DesktopSwipeDirection::Right; // Default
 
         // Layer 1: Canonical Windows 11 Explorer Registry
         if let Some(cur_reg_vd) = Self::get_current_virtual_desktop_id() {
             if let Some(last_reg_vd) = self.last_registry_vd_id {
                 if cur_reg_vd != last_reg_vd {
                     let guid = guid_from_registry_bytes(cur_reg_vd);
-                    info!("Detected virtual desktop switch via Explorer Registry: {:?}", guid);
+
+                    // Compute physical left/right swipe direction based on desktop order
+                    let all_desktops = Self::get_all_virtual_desktop_ids();
+                    let old_idx = all_desktops.iter().position(|d| *d == last_reg_vd);
+                    let new_idx = all_desktops.iter().position(|d| *d == cur_reg_vd);
+
+                    direction = match (old_idx, new_idx) {
+                        (Some(o), Some(n)) if n < o => DesktopSwipeDirection::Left,
+                        _ => DesktopSwipeDirection::Right,
+                    };
+
+                    info!(
+                        "Virtual desktop switch: old_idx={:?}, new_idx={:?}, direction={:?}, GUID={:?}",
+                        old_idx, new_idx, direction, guid
+                    );
                     target_guid = Some(guid);
                 }
             }
             self.last_registry_vd_id = Some(cur_reg_vd);
         }
 
-        // Layer 2: IVirtualDesktopManager GUID check on active foreground window
+        // Layer 2: IVirtualDesktopManager GUID check on active foreground window fallback
         if target_guid.is_none() {
             if let Some(vdm) = &self.vdm {
                 let fg = unsafe { GetForegroundWindow() };
@@ -272,7 +339,6 @@ impl WindowScanner {
                         if guid != GUID::zeroed() {
                             if let Some(last_id) = self.last_desktop_id {
                                 if last_id != guid {
-                                    info!("Detected virtual desktop switch via IVirtualDesktopManager: {:?}", guid);
                                     target_guid = Some(guid);
                                 }
                             }
@@ -293,8 +359,6 @@ impl WindowScanner {
         if target_guid.is_none() && !self.last_uncloaked_hwnds.is_empty() && !current_hwnds.is_empty() {
             let common_count = self.last_uncloaked_hwnds.intersection(&current_hwnds).count();
             if common_count == 0 && (self.last_uncloaked_hwnds.len() >= 2 || current_hwnds.len() >= 2) {
-                info!("Detected virtual desktop switch via uncloaked window replacement");
-                // Get registry or foreground GUID
                 if let Some(reg_bytes) = Self::get_current_virtual_desktop_id() {
                     target_guid = Some(guid_from_registry_bytes(reg_bytes));
                 }
@@ -305,9 +369,13 @@ impl WindowScanner {
 
         if let Some(guid) = target_guid {
             self.last_desktop_id = Some(guid);
+            Some(VirtualDesktopSwitchEvent {
+                target_guid: guid,
+                direction,
+            })
+        } else {
+            None
         }
-
-        target_guid
     }
 
     /// Perform a full scan of all visible, cloaked-filtered top-level windows in top-to-bottom Z-order.
