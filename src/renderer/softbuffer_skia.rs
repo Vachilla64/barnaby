@@ -1,5 +1,6 @@
 use std::num::NonZeroU32;
 use std::sync::Arc;
+use ab_glyph::{Font, FontArc, PxScale, ScaleFont};
 use softbuffer::{Context, Surface};
 use tiny_skia::{
     Color, FillRule, Paint, PathBuilder, Pixmap, Rect, Stroke, Transform,
@@ -17,6 +18,7 @@ pub struct SoftbufferSkiaRenderer {
     _context: Context<Arc<Window>>,
     surface: Surface<Arc<Window>, Arc<Window>>,
     pixmap: Option<Pixmap>,
+    font: Option<FontArc>,
     width: u32,
     height: u32,
 }
@@ -35,10 +37,17 @@ impl SoftbufferSkiaRenderer {
 
         let pixmap = Pixmap::new(width.max(1), height.max(1));
 
+        // Load Windows Segoe UI font or Arial for crisp, readable speech bubble typography
+        let font = std::fs::read("C:\\Windows\\Fonts\\segoeui.ttf")
+            .or_else(|_| std::fs::read("C:\\Windows\\Fonts\\arial.ttf"))
+            .ok()
+            .and_then(|bytes| FontArc::try_from_vec(bytes).ok());
+
         Ok(Self {
             _context: context,
             surface,
             pixmap,
+            font,
             width,
             height,
         })
@@ -80,9 +89,9 @@ impl RenderBackend for SoftbufferSkiaRenderer {
         // 3. Draw Procedural Animated Pet
         Self::draw_animated_pet(pixmap, world);
 
-        // 4. Draw Speech Bubble if present
+        // 4. Draw Speech Bubble with Real Crisp Rendered Typography
         if let Some(speech) = &world.active_speech {
-            Self::draw_speech_bubble(pixmap, world, &speech.text);
+            Self::draw_speech_bubble(pixmap, self.font.as_ref(), world, &speech.text);
         }
 
         // 5. Blit tiny-skia RGBA premultiplied pixels to softbuffer 0xAARRGGBB format
@@ -123,7 +132,6 @@ impl SoftbufferSkiaRenderer {
         let breath = (t * 3.5).sin() * 1.5;
         let is_blinking = (t * 1.8).sin() > 0.95;
 
-        // Dynamic squash and stretch based on vertical velocity
         let stretch_y = (world.vy / 1200.0).clamp(-0.25, 0.35);
         let eff_height = PET_HEIGHT * (1.0 + stretch_y) + breath;
         let eff_width = PET_WIDTH * (1.0 - stretch_y * 0.5);
@@ -131,7 +139,6 @@ impl SoftbufferSkiaRenderer {
         let bottom_y = y + PET_HEIGHT;
         let top_y = bottom_y - eff_height;
 
-        // Dynamic transform for acrobatics (backflips)
         let transform = if world.rotation_rad != 0.0 {
             let rad = world.rotation_rad;
             let cos = rad.cos();
@@ -189,7 +196,7 @@ impl SoftbufferSkiaRenderer {
             }
         }
 
-        // B. Draw Body (Cute Rounded Cyber-Chibi Shape)
+        // B. Draw Body
         let body_rect = Rect::from_xywh(
             center_x - eff_width / 2.0,
             top_y,
@@ -212,7 +219,6 @@ impl SoftbufferSkiaRenderer {
             pb.close();
 
             if let Some(path) = pb.finish() {
-                // Vibrant Cyan / Neon Turquoise body
                 paint.set_color_rgba8(30, 220, 245, 245);
                 pixmap.fill_path(&path, &paint, FillRule::Winding, transform, None);
 
@@ -223,7 +229,7 @@ impl SoftbufferSkiaRenderer {
             }
         }
 
-        // C. Draw Cute Ears / Horns
+        // C. Draw Ears
         let ear_wiggle = (t * 8.0).sin() * 2.0;
         let mut pb_ear = PathBuilder::new();
         pb_ear.move_to(center_x - 16.0, top_y + 4.0);
@@ -237,11 +243,11 @@ impl SoftbufferSkiaRenderer {
         pb_ear.close();
 
         if let Some(ear_path) = pb_ear.finish() {
-            paint.set_color_rgba8(255, 80, 160, 240); // Neon Pink inner ears
+            paint.set_color_rgba8(255, 80, 160, 240);
             pixmap.fill_path(&ear_path, &paint, FillRule::Winding, transform, None);
         }
 
-        // D. Draw Eyes & Gaze Direction (Tracks Cursor)
+        // D. Draw Eyes & Gaze Direction
         let eye_y = top_y + eff_height * 0.42;
         let (cursor_dx, cursor_dy) = if let Some((cx, cy)) = world.cursor_pos {
             let dx = ((cx - center_x) / 100.0).clamp(-2.5, 2.5);
@@ -253,7 +259,6 @@ impl SoftbufferSkiaRenderer {
         };
 
         if is_blinking || world.state_kind == PetStateKind::Sitting || world.state_kind == PetStateKind::Sleeping || world.state_kind == PetStateKind::Petted {
-            // Happy closed eyes (^ ^)
             let mut stroke = Stroke::default();
             stroke.width = 2.5;
             paint.set_color_rgba8(15, 30, 50, 255);
@@ -269,11 +274,9 @@ impl SoftbufferSkiaRenderer {
                 pixmap.stroke_path(&path, &paint, &stroke, transform, None);
             }
         } else {
-            // Expressive Open Eyes
             let eye_h = if world.state_kind == PetStateKind::DraggedByUser { 12.0 } else { 9.0 };
             let eye_w = if world.state_kind == PetStateKind::DraggedByUser { 8.0 } else { 6.0 };
 
-            // Eye whites
             paint.set_color_rgba8(255, 255, 255, 255);
             let left_eye = Rect::from_xywh(center_x - 13.0, eye_y - eye_h / 2.0, eye_w, eye_h);
             let right_eye = Rect::from_xywh(center_x + 7.0, eye_y - eye_h / 2.0, eye_w, eye_h);
@@ -286,7 +289,6 @@ impl SoftbufferSkiaRenderer {
                 }
             }
 
-            // Pupils with dynamic cursor tracking
             paint.set_color_rgba8(15, 25, 45, 255);
             let left_pupil = Rect::from_xywh(center_x - 11.5 + cursor_dx, eye_y - 2.5 + cursor_dy, 3.5, 5.0);
             let right_pupil = Rect::from_xywh(center_x + 8.5 + cursor_dx, eye_y - 2.5 + cursor_dy, 3.5, 5.0);
@@ -313,7 +315,7 @@ impl SoftbufferSkiaRenderer {
             }
         }
 
-        // F. Cute Eating Animation Mouth
+        // F. Cute Eating Mouth
         if world.state_kind == PetStateKind::Eating {
             let chew = ((t * 16.0).sin() * 2.5).abs();
             let mut pb_mouth = PathBuilder::new();
@@ -387,7 +389,6 @@ impl SoftbufferSkiaRenderer {
                 }
 
                 ParticleType::Treat => {
-                    // Draw a strawberry/berry treat!
                     paint.set_color_rgba8(255, 60, 90, 240);
                     let mut pb = PathBuilder::new();
                     let s = p.size;
@@ -399,7 +400,6 @@ impl SoftbufferSkiaRenderer {
                         pixmap.fill_path(&path, &paint, FillRule::Winding, Transform::identity(), None);
                     }
 
-                    // Green leaf on top
                     paint.set_color_rgba8(50, 220, 80, 240);
                     let mut pb_leaf = PathBuilder::new();
                     pb_leaf.move_to(p.x, p.y - s / 2.0);
@@ -414,13 +414,27 @@ impl SoftbufferSkiaRenderer {
         }
     }
 
-    /// Renders a high-contrast speech bubble above the pet's head.
-    fn draw_speech_bubble(pixmap: &mut Pixmap, world: &WorldState, text: &str) {
-        let center_x = world.x + PET_WIDTH / 2.0;
+    /// Renders speech bubble with crisp, antialiased Segoe UI typography
+    fn draw_speech_bubble(pixmap: &mut Pixmap, font_opt: Option<&FontArc>, world: &WorldState, text: &str) {
+        let center_x = (world.x + PET_WIDTH / 2.0).max(40.0);
         let bubble_bottom = world.y - 12.0;
 
-        let char_count = text.len().max(8);
-        let bubble_width = (char_count as f32 * 7.5 + 24.0).clamp(90.0, 280.0);
+        // Measure text width using font
+        let scale_px = 14.0;
+        let scale = PxScale::from(scale_px);
+
+        let measured_width = if let Some(font) = font_opt {
+            let scaled_font = font.as_scaled(scale);
+            let mut w = 0.0f32;
+            for ch in text.chars() {
+                w += scaled_font.h_advance(scaled_font.glyph_id(ch));
+            }
+            w
+        } else {
+            text.len() as f32 * 7.5
+        };
+
+        let bubble_width = (measured_width + 24.0).clamp(70.0, world.screen_width - 40.0);
         let bubble_height = 28.0;
 
         let bubble_left = (center_x - bubble_width / 2.0).clamp(10.0, world.screen_width - bubble_width - 10.0);
@@ -449,25 +463,69 @@ impl SoftbufferSkiaRenderer {
             let mut paint = Paint::default();
             paint.anti_alias = true;
 
-            paint.set_color_rgba8(250, 252, 255, 240);
+            // Fill: Crisp translucent white
+            paint.set_color_rgba8(255, 255, 255, 245);
             pixmap.fill_path(&bubble_path, &paint, FillRule::Winding, Transform::identity(), None);
 
+            // Border: Dark Slate
             let mut stroke = Stroke::default();
             stroke.width = 1.5;
             paint.set_color_rgba8(30, 41, 59, 230);
             pixmap.stroke_path(&bubble_path, &paint, &stroke, Transform::identity(), None);
 
-            paint.set_color_rgba8(15, 23, 42, 220);
-            let text_rect = Rect::from_xywh(bubble_left + 10.0, bubble_top + 8.0, bubble_width - 20.0, bubble_height - 16.0);
-            if let Some(tr) = text_rect {
-                let line_y = tr.top() + tr.height() / 2.0 - 1.0;
-                let mut pb_text = PathBuilder::new();
-                pb_text.move_to(tr.left() + 4.0, line_y);
-                pb_text.line_to(tr.right() - 4.0, line_y);
-                if let Some(tp) = pb_text.finish() {
-                    let mut s = Stroke::default();
-                    s.width = 3.0;
-                    pixmap.stroke_path(&tp, &paint, &s, Transform::identity(), None);
+            // Render REAL text glyphs!
+            if let Some(font) = font_opt {
+                let scaled_font = font.as_scaled(scale);
+                let text_start_x = bubble_left + 12.0;
+                let text_start_y = bubble_top + 19.0;
+
+                let mut cursor_x = text_start_x;
+                for ch in text.chars() {
+                    let glyph_id = scaled_font.glyph_id(ch);
+                    let glyph = glyph_id.with_scale_and_position(scale, ab_glyph::point(cursor_x, text_start_y));
+                    cursor_x += scaled_font.h_advance(glyph_id);
+
+                    if let Some(outlined) = font.outline_glyph(glyph) {
+                        let bounds = outlined.px_bounds();
+                        let min_x = bounds.min.x as i32;
+                        let min_y = bounds.min.y as i32;
+
+                        outlined.draw(|gx, gy, coverage| {
+                            let px = min_x + gx as i32;
+                            let py = min_y + gy as i32;
+
+                            if px >= 0 && px < pixmap.width() as i32 && py >= 0 && py < pixmap.height() as i32 {
+                                let pixel_index = (py as usize * pixmap.width() as usize + px as usize) * 4;
+                                let alpha_factor = (coverage * 0.95).clamp(0.0, 1.0);
+                                if alpha_factor <= 0.01 {
+                                    return;
+                                }
+
+                                let pixel_bytes = &mut pixmap.data_mut()[pixel_index..pixel_index + 4];
+
+                                // Dark slate text color (#0F172A)
+                                let text_r = 15u32;
+                                let text_g = 23u32;
+                                let text_b = 42u32;
+
+                                let src_a = (alpha_factor * 255.0) as u32;
+                                let src_r = ((text_r as f32 * alpha_factor)) as u32;
+                                let src_g = ((text_g as f32 * alpha_factor)) as u32;
+                                let src_b = ((text_b as f32 * alpha_factor)) as u32;
+
+                                let dst_r = pixel_bytes[0] as u32;
+                                let dst_g = pixel_bytes[1] as u32;
+                                let dst_b = pixel_bytes[2] as u32;
+                                let dst_a = pixel_bytes[3] as u32;
+
+                                let inv_a = 255 - src_a;
+                                pixel_bytes[0] = (src_r + (dst_r * inv_a) / 255) as u8;
+                                pixel_bytes[1] = (src_g + (dst_g * inv_a) / 255) as u8;
+                                pixel_bytes[2] = (src_b + (dst_b * inv_a) / 255) as u8;
+                                pixel_bytes[3] = (src_a + (dst_a * inv_a) / 255) as u8;
+                            }
+                        });
+                    }
                 }
             }
         }
@@ -478,13 +536,11 @@ impl SoftbufferSkiaRenderer {
         let mut paint = Paint::default();
         paint.anti_alias = true;
 
-        // 1. Draw Scanned Windows (Neon Cyan Outlines)
         let mut stroke_win = Stroke::default();
         stroke_win.width = 1.5;
         paint.set_color_rgba8(0, 220, 255, 140);
 
         for win in &world.scanned_windows {
-            // Highlight fullscreen windows in deep amber/orange
             if win.is_fullscreen {
                 paint.set_color_rgba8(255, 140, 0, 100);
             } else {
@@ -506,7 +562,6 @@ impl SoftbufferSkiaRenderer {
             }
         }
 
-        // 2. Draw Walkable Platforms (Bright Neon Lime/Green Segments)
         let mut stroke_plat = Stroke::default();
         stroke_plat.width = 3.5;
         paint.set_color_rgba8(57, 255, 20, 240);
@@ -526,7 +581,6 @@ impl SoftbufferSkiaRenderer {
             }
         }
 
-        // 3. Draw Pet Bounding Box & Foot Anchor
         let mut stroke_pet = Stroke::default();
         stroke_pet.width = 2.0;
         paint.set_color_rgba8(255, 0, 128, 220);
@@ -546,7 +600,6 @@ impl SoftbufferSkiaRenderer {
             }
         }
 
-        // 4. Draw Cursor Crosshair
         if let Some((cx, cy)) = world.cursor_pos {
             let mut stroke_cur = Stroke::default();
             stroke_cur.width = 1.5;

@@ -1,6 +1,7 @@
 use std::collections::HashSet;
 use std::ffi::c_void;
 use std::mem::size_of;
+use tracing::info;
 use windows::core::{w, GUID, PCWSTR};
 use windows::Win32::Foundation::{BOOL, HWND, LPARAM, POINT, RECT};
 use windows::Win32::Graphics::Dwm::{
@@ -9,6 +10,9 @@ use windows::Win32::Graphics::Dwm::{
 use windows::Win32::Graphics::Gdi::ClientToScreen;
 use windows::Win32::System::Com::{
     CoCreateInstance, CoInitializeEx, CLSCTX_ALL, COINIT_APARTMENTTHREADED,
+};
+use windows::Win32::System::Registry::{
+    RegCloseKey, RegOpenKeyExW, RegQueryValueExW, HKEY, HKEY_CURRENT_USER, KEY_READ, REG_VALUE_TYPE,
 };
 use windows::Win32::System::SystemInformation::GetTickCount64;
 use windows::Win32::UI::Input::KeyboardAndMouse::{GetLastInputInfo, LASTINPUTINFO};
@@ -82,18 +86,20 @@ pub struct WindowScanner {
     screen_h: i32,
     vdm: Option<IVirtualDesktopManager>,
     last_desktop_id: Option<GUID>,
+    last_registry_vd_id: Option<[u8; 16]>,
     last_uncloaked_hwnds: HashSet<isize>,
 }
 
 impl WindowScanner {
     pub fn new(screen_x: i32, screen_y: i32, screen_w: i32, screen_h: i32) -> Self {
-        // Initialize COM for virtual desktop manager
         unsafe {
             let _ = CoInitializeEx(None, COINIT_APARTMENTTHREADED);
         }
         let vdm: Option<IVirtualDesktopManager> = unsafe {
             CoCreateInstance(&VirtualDesktopManager, None, CLSCTX_ALL).ok()
         };
+
+        let initial_reg_vd = Self::get_current_virtual_desktop_id();
 
         Self {
             own_hwnd: None,
@@ -103,6 +109,7 @@ impl WindowScanner {
             screen_h,
             vdm,
             last_desktop_id: None,
+            last_registry_vd_id: initial_reg_vd,
             last_uncloaked_hwnds: HashSet::new(),
         }
     }
@@ -114,13 +121,11 @@ impl WindowScanner {
         self.screen_h = h;
     }
 
-    /// Set our own overlay window HWND so it gets excluded from collision detection and platform extraction.
     pub fn set_own_hwnd(&mut self, hwnd: isize) {
         self.own_hwnd = Some(HWND(hwnd as *mut c_void));
     }
 
     /// Fast 60Hz query for a specific window's bounds without full EnumWindows overhead.
-    /// Used for buttery-smooth window-riding physics.
     pub fn get_window_bounds_fast(hwnd: isize) -> Option<WindowBounds> {
         unsafe {
             let target = HWND(hwnd as *mut c_void);
@@ -128,7 +133,6 @@ impl WindowScanner {
                 return None;
             }
 
-            // Check if window is cloaked (e.g. moved to another virtual desktop)
             let mut cloaked: u32 = 0;
             let cloaked_res = DwmGetWindowAttribute(
                 target,
@@ -170,12 +174,60 @@ impl WindowScanner {
         }
     }
 
+    /// Reads the canonical Windows 11 Virtual Desktop ID directly from the Windows Explorer registry.
+    /// In Windows 11, Explorer writes the active desktop ID to this key on EVERY desktop swipe.
+    pub fn get_current_virtual_desktop_id() -> Option<[u8; 16]> {
+        unsafe {
+            let mut hkey = HKEY::default();
+            let subkey = w!("SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Explorer\\VirtualDesktops");
+            if RegOpenKeyExW(HKEY_CURRENT_USER, subkey, 0, KEY_READ, &mut hkey).is_err() {
+                return None;
+            }
+
+            let mut buf = [0u8; 16];
+            let mut buf_size = 16u32;
+            let mut val_type = REG_VALUE_TYPE::default();
+            let val_name = w!("CurrentVirtualDesktop");
+
+            let res = RegQueryValueExW(
+                hkey,
+                val_name,
+                None,
+                Some(&mut val_type),
+                Some(buf.as_mut_ptr()),
+                Some(&mut buf_size),
+            );
+
+            let _ = RegCloseKey(hkey);
+
+            if res.is_ok() && buf_size == 16 {
+                Some(buf)
+            } else {
+                None
+            }
+        }
+    }
+
     /// Checks if the user just switched between Windows 11 Virtual Desktops.
-    /// Returns `true` exactly on the transition frame so the pet can poke out and leap into the new desktop!
+    /// Uses 3 redundant detection layers:
+    /// 1. Canonical Windows 11 Explorer Registry (`CurrentVirtualDesktop`)
+    /// 2. COM `IVirtualDesktopManager::GetWindowDesktopId` on active window
+    /// 3. Wholesale uncloaked window set transition detection
     pub fn check_virtual_desktop_switch(&mut self, scanned: &[ScannedWindow]) -> bool {
         let mut switched = false;
 
-        // Method 1: IVirtualDesktopManager GUID check on active foreground window
+        // Layer 1: Canonical Windows 11 Registry
+        if let Some(cur_reg_vd) = Self::get_current_virtual_desktop_id() {
+            if let Some(last_reg_vd) = self.last_registry_vd_id {
+                if cur_reg_vd != last_reg_vd {
+                    info!("Detected virtual desktop switch via Explorer Registry: {:?}", cur_reg_vd);
+                    switched = true;
+                }
+            }
+            self.last_registry_vd_id = Some(cur_reg_vd);
+        }
+
+        // Layer 2: IVirtualDesktopManager GUID check on active foreground window
         if let Some(vdm) = &self.vdm {
             let fg = unsafe { GetForegroundWindow() };
             if !fg.0.is_null() {
@@ -183,6 +235,7 @@ impl WindowScanner {
                     if guid != GUID::zeroed() {
                         if let Some(last_id) = self.last_desktop_id {
                             if last_id != guid {
+                                info!("Detected virtual desktop switch via IVirtualDesktopManager: {:?}", guid);
                                 switched = true;
                             }
                         }
@@ -192,8 +245,7 @@ impl WindowScanner {
             }
         }
 
-        // Method 2: Wholesale uncloaked window set transition detection
-        // When switching virtual desktops, the set of visible uncloaked HWNDs changes completely.
+        // Layer 3: Wholesale uncloaked window set transition
         let current_hwnds: HashSet<isize> = scanned
             .iter()
             .filter(|w| !w.is_taskbar && !w.is_fullscreen)
@@ -202,8 +254,8 @@ impl WindowScanner {
 
         if !self.last_uncloaked_hwnds.is_empty() && !current_hwnds.is_empty() {
             let common_count = self.last_uncloaked_hwnds.intersection(&current_hwnds).count();
-            // If less than 20% of previous uncloaked windows are present in the new set, a desktop switch occurred!
             if common_count == 0 && (self.last_uncloaked_hwnds.len() >= 2 || current_hwnds.len() >= 2) {
+                info!("Detected virtual desktop switch via uncloaked window replacement");
                 switched = true;
             }
         }
