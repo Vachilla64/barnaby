@@ -30,6 +30,23 @@ pub struct PetConfig {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct TourConfig {
+    /// true: VS Code opens each file and highlights the lines. false: Barnaby only says where to look.
+    #[serde(default = "default_true")]
+    pub navigate: bool,
+}
+
+fn default_true() -> bool {
+    true
+}
+
+impl Default for TourConfig {
+    fn default() -> Self {
+        Self { navigate: true }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AppConfig {
     pub port: u16,
     pub token: String,
@@ -38,6 +55,8 @@ pub struct AppConfig {
     pub push_to_talk: String,
     pub pets: HashMap<String, PetConfig>,
     pub projects: Vec<String>,
+    #[serde(default)]
+    pub tour: TourConfig,
 }
 
 impl Default for AppConfig {
@@ -82,6 +101,7 @@ impl Default for AppConfig {
             push_to_talk: "Ctrl+Alt+Space".to_string(),
             pets,
             projects: Vec::new(),
+            tour: TourConfig::default(),
         }
     }
 }

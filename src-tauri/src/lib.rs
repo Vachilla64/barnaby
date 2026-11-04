@@ -137,6 +137,54 @@ async fn connect_claude() -> Result<String, String> {
         .map_err(|e| e.to_string())?
 }
 
+/// Tour setting: true moves VS Code for the user, false only says where to look.
+#[tauri::command]
+fn set_tour_navigate(navigate: bool) -> Result<(), String> {
+    let mut cfg = config::load_or_create_config().map_err(|e| e.to_string())?;
+    cfg.tour.navigate = navigate;
+    config::save_config(&cfg).map_err(|e| e.to_string())
+}
+
+/// Speak a line in Barnaby's own voice (greetings, "clearing my throat").
+#[tauri::command]
+async fn say_text(text: String, state: tauri::State<'_, Arc<server::ServerState>>) -> Result<(), String> {
+    server::speak(&state, "barnaby", &text, voice::queue::Priority::High, voice::queue::SpeechKind::Status).await;
+    Ok(())
+}
+
+/// Speak a sample in any voice, for the voice picker in Settings.
+#[tauri::command]
+async fn preview_voice(voice: String, state: tauri::State<'_, Arc<server::ServerState>>) -> Result<(), String> {
+    let queue = state.speech_queue.as_ref().ok_or("The voice engine is not ready yet.")?;
+    queue
+        .enqueue(voice::queue::SpeechRequest {
+            agent_id: "preview".into(),
+            text: format!("Good evening. I am {voice}, at your service."),
+            priority: voice::queue::Priority::High,
+            kind: voice::queue::SpeechKind::Status,
+            voice: Some(voice),
+        })
+        .await;
+    Ok(())
+}
+
+#[derive(serde::Serialize)]
+struct AppStatus {
+    vscode: bool,
+    folders: Vec<String>,
+    agents: Vec<agents::AgentInfo>,
+}
+
+/// What Settings shows at the top: is VS Code linked, which agents are talking to Barnaby.
+#[tauri::command]
+fn app_status(state: tauri::State<'_, Arc<server::ServerState>>) -> AppStatus {
+    AppStatus {
+        vscode: state.hub.is_connected(),
+        folders: state.hub.workspace_folders(),
+        agents: state.registry.list(),
+    }
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     // Initialize logging first
@@ -182,6 +230,10 @@ pub fn run() {
             has_api_key,
             connect_preview_claude,
             connect_claude,
+            set_tour_navigate,
+            say_text,
+            preview_voice,
+            app_status,
             voice::get_phonon_status,
             voice::start_phonon,
             voice::install_uv,

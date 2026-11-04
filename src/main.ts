@@ -1,7 +1,7 @@
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
-import { AppConfig, PetState } from "./types";
+import { AppConfig, PetState, PhononStatusInfo } from "./types";
 import { PetComponent } from "./pet";
 import { SpeechBubbleComponent } from "./bubble";
 import { PetMenuManager } from "./menu";
@@ -333,6 +333,45 @@ async function main() {
     feedManager.addItem("Barnaby started");
     updateClickRegions();
   }, 300);
+
+  // The speech engine can take a while to load. Say so, start it if it is down, and greet when ready.
+  const warmUpVoice = async () => {
+    let announced = false;
+    let offlinePolls = 0;
+    let startRequested = false;
+    for (let i = 0; i < 150; i++) {
+      let info: PhononStatusInfo | null = null;
+      try {
+        info = await invoke<PhononStatusInfo>("get_phonon_status");
+      } catch (e) {
+        console.error("get_phonon_status failed:", e);
+      }
+      if (info?.state === "ready") {
+        if (announced) {
+          pet.setState("happy");
+          bubble.show("Ah, that's better. My voice is ready.", [], 4000);
+          setTimeout(() => pet.setState("idle"), 1800);
+          invoke("say_text", { text: "Ahem. Good evening. Barnaby, at your service." }).catch(console.error);
+        }
+        return;
+      }
+      if (!announced) {
+        announced = true;
+        pet.setState("thinking");
+        bubble.show("Clearing my throat... one moment.", [], 0);
+      }
+      const down = info?.state === "offline" || info?.state === "failed";
+      offlinePolls = down ? offlinePolls + 1 : 0;
+      if (down && offlinePolls >= 2 && !startRequested && info?.uv_installed && info?.ptts_installed) {
+        startRequested = true; // the backend normally starts it; this is the safety net
+        invoke("start_phonon").catch(console.error);
+      }
+      await new Promise((r) => setTimeout(r, 2000));
+    }
+    pet.setState("idle");
+    bubble.show("My voice would not start. Open Settings to see why.", [], 8000);
+  };
+  setTimeout(() => void warmUpVoice(), 5600);
 }
 
 window.addEventListener("DOMContentLoaded", main);

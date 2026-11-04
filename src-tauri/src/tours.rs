@@ -82,6 +82,38 @@ pub fn resolve_path(path: &str, roots: &[String]) -> Option<PathBuf> {
     })
 }
 
+/// How a file name is said aloud: "login.ts" becomes "login dot ts".
+fn spoken_file(path: &str) -> String {
+    let name = Path::new(path)
+        .file_name()
+        .map(|f| f.to_string_lossy().to_string())
+        .unwrap_or_default();
+    name.replace('.', " dot ").replace(['_', '-'], " ")
+}
+
+/// What he says first so you know where to look: "Look at lines 12 to 20 of login dot ts."
+pub fn where_phrase(step: &TourStep) -> String {
+    let lines = if step.start_line == step.end_line {
+        format!("line {}", step.start_line)
+    } else {
+        format!("lines {} to {}", step.start_line, step.end_line)
+    };
+    format!("Look at {lines} of {}.", spoken_file(&step.path))
+}
+
+/// The narration, with the location in front unless the narration already names the file.
+pub fn spoken_step(step: &TourStep) -> String {
+    let stem = Path::new(&step.path)
+        .file_stem()
+        .map(|s| s.to_string_lossy().to_lowercase())
+        .unwrap_or_default();
+    if !stem.is_empty() && step.narration.to_lowercase().contains(&stem) {
+        step.narration.clone()
+    } else {
+        format!("{} {}", where_phrase(step), step.narration)
+    }
+}
+
 fn line_count(path: &Path) -> u32 {
     std::fs::read_to_string(path)
         .map(|t| t.lines().count().max(1) as u32)
@@ -202,11 +234,16 @@ impl TourEngine {
         let tour_id = format!("tour-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0));
         let total = steps.len();
         let mut index = 0usize;
-        tracing::info!("Tour '{title}' started: {total} steps (vscode connected: {})", self.hub.is_connected());
+        // Settings: move VS Code for the user, or only say where to look.
+        let navigate = crate::config::load_or_create_config().map(|c| c.tour.navigate).unwrap_or(true);
+        tracing::info!(
+            "Tour '{title}' started: {total} steps (vscode connected: {}, navigate: {navigate})",
+            self.hub.is_connected()
+        );
 
         'tour: loop {
             let step = &steps[index];
-            let connected = self.hub.is_connected();
+            let connected = navigate && self.hub.is_connected();
             if connected {
                 self.hub.send(json!({
                     "type": "tour.step", "tour_id": tour_id, "index": index, "total": total,
@@ -231,7 +268,7 @@ impl TourEngine {
                 }
             }
 
-            self.say(kind, &step.narration).await;
+            self.say(kind, &spoken_step(step)).await;
 
             // Wait for the speech to finish, then the gap, listening for controls throughout.
             let mut paused = false;
@@ -269,7 +306,7 @@ impl TourEngine {
             index += 1;
         }
 
-        if self.hub.is_connected() {
+        if navigate && self.hub.is_connected() {
             self.hub.send(json!({"type": "tour.end", "tour_id": tour_id}));
         }
         self.emit("tour:end", json!({"agent_kind": kind, "tour_id": tour_id}));
@@ -311,6 +348,15 @@ mod tests {
         assert!(resolve_path("demo-project/src/a.ts", &roots).is_some());
         assert!(resolve_path("demo-project\\src\\a.ts", &roots).is_some());
         assert!(resolve_path("other/src/a.ts", &roots).is_none());
+    }
+
+    #[test]
+    fn says_where_to_look_unless_the_narration_already_does() {
+        let step = |n: &str, s, e| TourStep { path: "C:\\p\\src\\login_form.ts".into(), start_line: s, end_line: e, narration: n.into() };
+        assert_eq!(where_phrase(&step("x", 12, 20)), "Look at lines 12 to 20 of login form dot ts.");
+        assert_eq!(where_phrase(&step("x", 7, 7)), "Look at line 7 of login form dot ts.");
+        assert_eq!(spoken_step(&step("The check happens here.", 3, 4)), "Look at lines 3 to 4 of login form dot ts. The check happens here.");
+        assert_eq!(spoken_step(&step("In login_form the password is hashed.", 3, 4)), "In login_form the password is hashed.");
     }
 
     #[test]

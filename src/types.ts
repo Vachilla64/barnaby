@@ -29,7 +29,8 @@ export interface PetConfig {
 export interface AppConfig {
   port: number;
   token: string;
-  brain: { model: string };
+  brain: { model: string; base_url?: string };
+  tour?: { navigate: boolean };
   voice: {
     enabled: boolean;
     volume: number;
