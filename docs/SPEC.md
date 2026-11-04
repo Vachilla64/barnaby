@@ -121,13 +121,16 @@ Follow [PLAYBOOK.md](PLAYBOOK.md) sections "The shape of the solution" and "How 
 A normal small window (640×560), opened from the tray icon or the pet menu. Sections:
 
 1. **Meta API key:** password field, `Test` button (calls the API with a 5-token prompt), saved in Windows Credential Manager (`keyring` crate, service `Devy`).
-2. **Voice:** status of Phonon (`installing / starting / ready / failed`), voice per agent kind (defaults: Claude `Freya`, Gemini `Easton`, other agents `Freya`), volume, mute all.
+2. **Voice:** status of Phonon (`installing / starting / ready / failed`), voice per agent kind (defaults: Claude `Freya`, Gemini `Easton`, Oscar/Devy `Toby` (British male default), other agents `Toby`), volume, mute all.
 3. **Push-to-talk key:** default `Ctrl+Alt+Space` (hold to talk).
 4. **Connect agents:** for Claude Code and Gemini CLI, a `Connect` button that runs the setup in [5.4](#54-agent-link-mcp-and-hooks), and a `Copy instructions` button that copies the snippet from [5.4.4](#544-instructions-snippet-for-the-agents-memory-file).
 5. **Projects:** list of known project folders (added automatically by the VS Code extension or MCP calls, or by `Add folder`).
 6. **Privacy note:** "Questions and the code needed to answer them are sent to Meta's Model API. Nothing else leaves this computer."
 
 ### 5.3 Voice out: Phonon
+
+Oscar/Devy speaks with a British male voice from the default Phonon catalog (`Toby` - crisp, attentive, conversational British English).
+Devy speaks periodic status updates during long agent tasks mid-stream so the user is never left in silence, while using the speech queue throttle to stay polite and concise.
 
 **Setup on first run** (Rust `voice/phonon.rs`), shown as a progress line in settings and spoken by nobody until done:
 
@@ -320,7 +323,7 @@ Paths are absolute Windows paths on the wire.
   "port": 4747,
   "token": "hex...",
   "brain": {"model": "muse-spark-1.3"},
-  "voice": {"enabled": true, "volume": 0.9, "voices": {"claude-code": "Freya", "gemini-cli": "Easton", "other": "Freya"}},
+  "voice": {"enabled": true, "volume": 0.9, "voices": {"claude-code": "Freya", "gemini-cli": "Easton", "devy": "Toby", "other": "Toby"}},
   "push_to_talk": "Ctrl+Alt+Space",
   "pets": {"claude-code": {"colour": "#E8875B", "x": null, "y": null}, "gemini-cli": {"colour": "#5B8DEF", "x": null, "y": null}},
   "projects": ["C:\\Users\\me\\code\\my-app"]
