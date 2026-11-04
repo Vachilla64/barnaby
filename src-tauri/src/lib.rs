@@ -1,10 +1,13 @@
 pub mod agents;
+pub mod brain;
 pub mod config;
 pub mod connect;
 pub mod logging;
 pub mod mcp;
 pub mod overlay;
 pub mod server;
+pub mod tours;
+pub mod vscode;
 pub mod voice;
 
 use overlay::{
@@ -24,6 +27,43 @@ use voice::{
     queue::SpeechQueue,
     VoiceState,
 };
+
+#[tauri::command]
+async fn ask_question(question: String, state: tauri::State<'_, Arc<server::ServerState>>) -> Result<(), String> {
+    let st = state.inner().clone();
+    tokio::spawn(async move {
+        brain::ask_and_present(st, question).await;
+    });
+    Ok(())
+}
+
+#[tauri::command]
+async fn accept_tour(state: tauri::State<'_, Arc<server::ServerState>>) -> Result<usize, String> {
+    Ok(state.tours.start_pending("barnaby", server::pet_colour("barnaby")).await)
+}
+
+#[tauri::command]
+async fn tour_control(action: String, state: tauri::State<'_, Arc<server::ServerState>>) -> Result<(), String> {
+    if let Some(c) = tours::Control::parse(&action) {
+        state.tours.control(c).await;
+    }
+    Ok(())
+}
+
+#[tauri::command]
+fn save_api_key(key: String) -> Result<(), String> {
+    brain::save_api_key(&key)
+}
+
+#[tauri::command]
+fn has_api_key() -> bool {
+    brain::load_api_key().is_some()
+}
+
+#[tauri::command]
+async fn test_api_key() -> Result<String, String> {
+    brain::test_connection().await
+}
 
 #[tauri::command]
 fn connect_preview_claude() -> Result<String, String> {
@@ -73,6 +113,12 @@ pub fn run() {
             overlay::save_pet_position,
             overlay::open_settings,
             overlay::exit_app,
+            ask_question,
+            accept_tour,
+            tour_control,
+            save_api_key,
+            test_api_key,
+            has_api_key,
             connect_preview_claude,
             connect_claude,
             voice::get_phonon_status,
@@ -221,12 +267,23 @@ pub fn run() {
             .visible(false)
             .build()?;
 
+            // Shared state for the HTTP server, MCP, VS Code link, tours and the Tauri commands
+            let hub = Arc::new(vscode::VsCodeHub::new());
+            let tours = tours::TourEngine::new(hub.clone(), Some(queue.clone()), Some(app.handle().clone()));
+            let core = Arc::new(server::ServerState {
+                token: server_token.clone(),
+                port: preferred_port,
+                app_handle: Some(app.handle().clone()),
+                speech_queue: Some(queue.clone()),
+                registry: Arc::new(agents::AgentRegistry::default()),
+                hub,
+                tours,
+            });
+            app.manage(core.clone());
+
             // Start axum server in tokio runtime
-            let token_clone = server_token.clone();
-            let app_handle = app.handle().clone();
-            let queue_clone = queue.clone();
             tauri::async_runtime::spawn(async move {
-                match server::start_server(token_clone, preferred_port, Some(app_handle), Some(queue_clone), Arc::new(agents::AgentRegistry::default())).await {
+                match server::start_server(core, preferred_port).await {
                     Ok((actual_port, _handle)) => {
                         tracing::info!("Barnaby axum server running on port {}", actual_port);
                         if actual_port != preferred_port {

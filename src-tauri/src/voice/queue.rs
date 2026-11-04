@@ -315,6 +315,12 @@ impl SpeechQueue {
         }
     }
 
+    /// True while a sentence is playing or waiting to play.
+    pub async fn is_busy(&self) -> bool {
+        let st = self.state.lock().await;
+        st.is_playing || !st.items.is_empty()
+    }
+
     /// Stop speech immediately, clear queue, and cancel playback.
     pub async fn stop_speech(&self) {
         let mut st = self.state.lock().await;

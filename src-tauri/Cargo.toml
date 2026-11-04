@@ -36,6 +36,9 @@ windows = { version = "0.62", features = [
 ] }
 reqwest = { version = "0.12", features = ["stream", "json"] }
 rodio = "0.20"
+ignore = "0.4"
+regex = "1"
+keyring = { version = "3", features = ["windows-native"] }
 
 [profile.dev]
 incremental = false

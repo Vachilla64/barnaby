@@ -6,6 +6,13 @@ use std::path::PathBuf;
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct BrainConfig {
     pub model: String,
+    /// OpenAI-compatible Chat Completions base URL. Meta's by default; can point at a local model.
+    #[serde(default = "default_base_url")]
+    pub base_url: String,
+}
+
+fn default_base_url() -> String {
+    "https://api.meta.ai/v1".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -65,6 +72,7 @@ impl Default for AppConfig {
             token: random_token,
             brain: BrainConfig {
                 model: "muse-spark-1.3".to_string(),
+                base_url: default_base_url(),
             },
             voice: VoiceConfig {
                 enabled: true,

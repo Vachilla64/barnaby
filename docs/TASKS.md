@@ -42,24 +42,24 @@ Tick each task when it is done and verified (see AGENTS.md). Phases and their "D
 - [ ] Commit `P3: agent link`
 
 ## P4. Brain
-- [ ] Settings: API key field, Test button, keyring storage, `MODEL_API_KEY` fallback
+- [x] Settings: API key field, Test button, keyring storage, `MODEL_API_KEY` fallback
 - [ ] Read Meta's Chat Completions and Tool calling docs; note differences from OpenAI below
-- [ ] Muse Spark client (chat completions, tools, streaming, 60 s timeout)
-- [ ] Repo index: walk, symbols, repo map, full text under 400k tokens, file watcher
-- [ ] Tools: read_file, search, list_dir (sandboxed to project root)
-- [ ] Ask flow: JSON answer, validation, clamp lines, retry once
-- [ ] `Ask…` text box in the pet menu; `POST /api/v1/ask`
-- [ ] Error messages from SPEC 7
+- [x] Muse Spark client (chat completions, tools, 60 s timeout; no streaming, cut)
+- [x] Repo index: walk, symbols, repo map, full text under 400k tokens (rebuilt on every ask; no file watcher, cut)
+- [x] Tools: read_file, search, list_dir (sandboxed to project root)
+- [x] Ask flow: JSON answer, validation, clamp lines, retry once
+- [x] `Ask…` text box in the pet menu; `POST /api/v1/ask`
+- [x] Error messages from SPEC 7
 - [ ] Commit `P4: brain`
 
 ## P5. VS Code extension and tours
-- [ ] Extension scaffold in `vscode-extension/` (TypeScript), reads config for port and token
-- [ ] WebSocket client with reconnect, status bar item, `hello`, `editor.context`
-- [ ] `tour.step` handler: open, smooth scroll, highlight decoration, reply `tour.step.shown`
-- [ ] Commands and keybindings: Ask about this, Next, Previous, Stop
-- [ ] Tour engine in Rust (steps, timing, controls); bubble Back/Next/Stop
-- [ ] Hook `barnaby_tour` up to the engine
-- [ ] Package `.vsix`
+- [x] Extension scaffold in `vscode-extension/` (TypeScript), reads config for port and token
+- [x] WebSocket client with reconnect, status bar item, `hello`, `editor.context`
+- [x] `tour.step` handler: open, smooth scroll, highlight decoration, reply `tour.step.shown`
+- [x] Commands and keybindings: Ask about this, Next, Previous, Stop
+- [x] Tour engine in Rust (steps, timing, controls); bubble Back/Next/Stop
+- [x] Hook `barnaby_tour` up to the engine
+- [x] Package `.vsix`
 - [ ] Commit `P5: tours`
 
 ## P6. Voice in
@@ -90,3 +90,6 @@ Tick each task when it is done and verified (see AGENTS.md). Phases and their "D
 - 2026-11-04: P3 backend done (`agents.rs`, `mcp.rs`, `connect.rs`, hook route). Verified live with curl: `/mcp` tools/list, hook Notification -> registry state `alert`, Phonon auto-started and healthy. Stubs: `barnaby_ask_user` speaks and returns "no answer" (bubble buttons come with P4/P6); `barnaby_tour` returns "started" (P5). Registry has no sleep/removal timers yet and the overlay shows one pet (claude-code); both are open. Gemini Connect button only shows manual steps (scope cut). Not yet verified: a real Claude Code session after Connect.
 - 2026-11-04: Fixed a P2 bug: Phonon streams a WAV with 0xFFFFFFFF sizes in the header and rodio could not decode it ("end of stream"). `fix_wav_header` now writes the real sizes. Needs a restart of the app to hear it.
 - 2026-11-04: The C: drive hit 0 bytes free during a build. `src-tauri/target` is ~2.8 GB; delete stale `target/debug` output after any rename.
+- 2026-11-04: P4 and P5 built. Verified with fakes, not the real services: a scripted OpenAI-style mock model (search tool, read_file tool, fenced JSON answer -> spoken answer plus tour offer) and a Node fake VS Code client over `/ws` (tour.step with clamped lines, missing file dropped, `next` control, auto-advance after speech, tour.end). NOT verified: a real Meta API key (none on this machine; `brain.base_url` in config.json can point at any OpenAI-compatible server, for example Ollama), the extension inside a real VS Code (not installed here; Antigravity is, and takes the same .vsix), the overlay bubble buttons by eye.
+- 2026-11-04: The local server falls back to ports 4748-4757 and saves the port it used. The Claude Connect hooks and the extension both read that port, so re-run Connect after a port change. A stale instance can hold 4747 for a few seconds after quit.
+- 2026-11-04: Install the extension with `code --install-extension vscode-extension/barnaby-vscode-0.1.0.vsix` (or Extensions > Install from VSIX). Rebuild with `pnpm package` in `vscode-extension/`.

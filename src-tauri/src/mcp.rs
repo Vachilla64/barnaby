@@ -99,10 +99,19 @@ async fn call_tool(state: &ServerState, kind: &str, name: &str, args: &Value) ->
             Ok("no answer".into())
         }
         "barnaby_tour" => {
-            // Tour engine arrives with P5.
             let title = str_arg(args, "title");
+            let steps: Vec<crate::tours::TourStep> = args
+                .get("steps")
+                .cloned()
+                .and_then(|v| serde_json::from_value(v).ok())
+                .unwrap_or_default();
             state.registry.touch(kind, None, Some(&format!("tour: {title}")));
-            Ok("started".into())
+            let n = state.tours.start(kind, title, steps, crate::server::pet_colour(kind)).await;
+            if n == 0 {
+                Err("No tour steps pointed at files I can find. Use absolute paths or paths inside an open workspace.".into())
+            } else {
+                Ok("started".into())
+            }
         }
         other => Err(format!("Unknown tool: {other}")),
     }

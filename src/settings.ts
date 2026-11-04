@@ -98,6 +98,18 @@ export function initSettingsView(container: HTMLElement): void {
           </div>
         </section>
 
+        <!-- Brain: Meta API key -->
+        <section class="settings-card">
+          <label class="card-title">Brain (Muse Spark)</label>
+          <p class="card-desc">Barnaby needs a Meta Model API key to answer questions about your code. It is stored in Windows Credential Manager.</p>
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <input type="password" id="api-key-input" class="select-voice" style="flex: 1;" placeholder="Paste your Meta API key" />
+            <button id="api-key-save" class="btn btn-primary btn-sm">Save</button>
+            <button id="api-key-test" class="btn btn-secondary btn-sm">Test</button>
+          </div>
+          <span id="api-key-msg" class="status-msg"></span>
+        </section>
+
         <!-- 4. Connect Coding Agents -->
         <section class="settings-card">
           <label class="card-title">Connect Coding Agents</label>
@@ -280,6 +292,40 @@ export function initSettingsView(container: HTMLElement): void {
 
   pollPhononStatus();
   const pollInterval = setInterval(pollPhononStatus, 2500);
+
+  // Meta API key: save, test
+  const keyInput = document.getElementById("api-key-input") as HTMLInputElement | null;
+  const keyMsg = document.getElementById("api-key-msg");
+  const setKeyMsg = (text: string) => {
+    if (keyMsg) keyMsg.textContent = text;
+  };
+  invoke<boolean>("has_api_key")
+    .then((has) => {
+      if (has && keyInput) keyInput.placeholder = "A key is saved. Paste a new one to replace it.";
+    })
+    .catch(console.error);
+  document.getElementById("api-key-save")?.addEventListener("click", async () => {
+    const key = keyInput?.value.trim() ?? "";
+    if (!key) {
+      setKeyMsg("Paste a key first.");
+      return;
+    }
+    try {
+      await invoke("save_api_key", { key });
+      if (keyInput) keyInput.value = "";
+      setKeyMsg("Saved.");
+    } catch (e) {
+      setKeyMsg(`${e}`);
+    }
+  });
+  document.getElementById("api-key-test")?.addEventListener("click", async () => {
+    setKeyMsg("Testing...");
+    try {
+      setKeyMsg(await invoke<string>("test_api_key"));
+    } catch (e) {
+      setKeyMsg(`${e}`);
+    }
+  });
 
   // Connect Claude Code: show exactly what changes, then ask (AGENTS.md rule).
   const connectBtn = document.getElementById("connect-claude-btn") as HTMLButtonElement | null;

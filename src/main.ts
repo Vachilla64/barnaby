@@ -123,8 +123,13 @@ async function main() {
             pet.setState("idle");
           },
         },
-      ]);
+      ], 60000);
       feedManager.addItem(`Asked: "${question}"`);
+      invoke("ask_question", { question }).catch((e) => {
+        console.error("ask_question failed:", e);
+        bubble.show("I couldn't ask just now.", [], 3000);
+        pet.setState("idle");
+      });
     },
     onRepeat: () => {
       const items = feedManager.getItems();
@@ -147,9 +152,15 @@ async function main() {
   });
 
   // 4. Listen for backend speech events (P2 Voice Out)
+  let tourActive = false;
+
   await listen<{ agent_id: string; sentence: string }>("speech:start", (event) => {
     const { sentence } = event.payload;
     if (!sentence) return;
+    if (tourActive) {
+      pet.setState("talking");
+      return; // the tour bubble already shows this narration with its Back/Next/Stop buttons
+    }
 
     pet.setState("talking");
     bubble.show(sentence, [
@@ -170,11 +181,66 @@ async function main() {
     if (pet.state === "talking") {
       pet.setState("idle");
     }
+    if (tourActive) return;
     setTimeout(() => {
-      if (pet.state !== "talking") {
+      if (pet.state !== "talking" && !tourActive) {
         bubble.hide();
       }
     }, 1500);
+  });
+
+  // Tours (P5): the bubble shows each step with Back / Next / Stop
+  const tourControl = (action: string) => invoke("tour_control", { action }).catch(console.error);
+
+  await listen<{
+    index: number;
+    total: number;
+    path: string;
+    start_line: number;
+    narration: string;
+    vscode: boolean;
+  }>("tour:step", (event) => {
+    const t = event.payload;
+    tourActive = true;
+    pet.setState("talking");
+    const shortPath = t.path.split(/[\\/]/).slice(-2).join("/");
+    const where = t.vscode ? "" : `${shortPath}:${t.start_line} - `;
+    bubble.show(
+      `${t.index + 1}/${t.total}  ${where}${t.narration}`,
+      [
+        { id: "back", label: "Back", onClick: () => tourControl("back") },
+        { id: "next", label: "Next", onClick: () => tourControl("next") },
+        { id: "stop", label: "Stop", onClick: () => tourControl("stop") },
+      ],
+      0,
+    );
+    feedManager.addItem(`Tour ${t.index + 1}/${t.total}: ${t.narration}`);
+  });
+
+  await listen("tour:end", () => {
+    tourActive = false;
+    pet.setState("idle");
+    setTimeout(() => {
+      if (!tourActive) bubble.hide();
+    }, 2500);
+  });
+
+  await listen<{ steps: number }>("tour:offer", (event) => {
+    bubble.show(
+      `I can walk you through it in ${event.payload.steps} steps. Want me to show you?`,
+      [
+        {
+          id: "show",
+          label: "Show me",
+          onClick: () => {
+            bubble.hide();
+            invoke("accept_tour").catch(console.error);
+          },
+        },
+        { id: "no", label: "No thanks", onClick: () => bubble.hide() },
+      ],
+      30000,
+    );
   });
 
   await listen<{ agent_id: string; text: string }>("speech:bubble", (event) => {

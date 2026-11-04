@@ -19,6 +19,8 @@ pub struct ServerState {
     pub app_handle: Option<AppHandle>,
     pub speech_queue: Option<crate::voice::queue::SpeechQueue>,
     pub registry: Arc<crate::agents::AgentRegistry>,
+    pub hub: Arc<crate::vscode::VsCodeHub>,
+    pub tours: Arc<crate::tours::TourEngine>,
 }
 
 #[derive(Serialize)]
@@ -48,6 +50,22 @@ pub fn emit_agent_state(state: &ServerState, kind: &str, pet_state: &str, text: 
     }
 }
 
+/// The Phonon voice configured for an agent kind.
+pub fn voice_for(kind: &str) -> String {
+    crate::config::load_or_create_config()
+        .ok()
+        .and_then(|cfg| cfg.voice.voices.get(kind).cloned())
+        .unwrap_or_else(|| "Toby".into())
+}
+
+/// The pet colour for an agent kind, used to tint VS Code highlights.
+pub fn pet_colour(kind: &str) -> String {
+    crate::config::load_or_create_config()
+        .ok()
+        .and_then(|cfg| cfg.pets.get(kind).map(|p| p.colour.clone()))
+        .unwrap_or_else(|| "#E8875B".into())
+}
+
 /// Speak through the queue with the voice configured for this agent kind.
 pub async fn speak(
     state: &ServerState,
@@ -57,10 +75,7 @@ pub async fn speak(
     speech_kind: crate::voice::queue::SpeechKind,
 ) {
     let Some(queue) = &state.speech_queue else { return };
-    let voice = crate::config::load_or_create_config()
-        .ok()
-        .and_then(|cfg| cfg.voice.voices.get(kind).cloned())
-        .unwrap_or_else(|| "Toby".into());
+    let voice = voice_for(kind);
     queue
         .enqueue(crate::voice::queue::SpeechRequest {
             agent_id: kind.to_string(),
@@ -98,6 +113,18 @@ async fn mcp_handler(
         0 => StatusCode::ACCEPTED.into_response(),
         1 => Json(replies.remove(0)).into_response(),
         _ => Json(replies).into_response(),
+    }
+}
+
+#[derive(Deserialize)]
+struct AskPayload {
+    question: String,
+}
+
+async fn ask_handler(State(state): State<Arc<ServerState>>, Json(p): Json<AskPayload>) -> Response {
+    match crate::brain::ask_and_present(state, p.question).await {
+        Some(answer) => Json(answer).into_response(),
+        None => (StatusCode::BAD_GATEWAY, Json(serde_json::json!({"error": "no answer"}))).into_response(),
     }
 }
 
@@ -199,21 +226,20 @@ pub fn build_router(state: Arc<ServerState>) -> Router {
         .route("/api/v1/say", post(say_handler))
         .route("/api/v1/hooks/{kind}", post(hook_handler))
         .route("/mcp", post(mcp_handler))
+        .route("/api/v1/ask", post(ask_handler))
         .route_layer(middleware::from_fn_with_state(state.clone(), auth_middleware));
 
     Router::new()
         .route("/health", get(health_handler))
+        .route("/ws", get(crate::vscode::ws_handler))
         .merge(protected_routes)
         .layer(tower_http::cors::CorsLayer::permissive())
         .with_state(state)
 }
 
 pub async fn start_server(
-    token: String,
+    state: Arc<ServerState>,
     preferred_port: u16,
-    app_handle: Option<AppHandle>,
-    speech_queue: Option<crate::voice::queue::SpeechQueue>,
-    registry: Arc<crate::agents::AgentRegistry>,
 ) -> Result<(u16, tokio::task::JoinHandle<()>), Box<dyn std::error::Error + Send + Sync>> {
     let mut bound_listener = None;
     let mut bound_port = preferred_port;
@@ -244,14 +270,6 @@ pub async fn start_server(
         )
     })?;
 
-    let state = Arc::new(ServerState {
-        token,
-        port: bound_port,
-        app_handle,
-        speech_queue,
-        registry,
-    });
-
     let app = build_router(state);
 
     let handle = tokio::spawn(async move {
@@ -265,12 +283,15 @@ pub async fn start_server(
 
 #[cfg(test)]
 pub fn test_state_with_token(token: &str) -> ServerState {
+    let hub = Arc::new(crate::vscode::VsCodeHub::new());
     ServerState {
         token: token.to_string(),
         port: 4747,
         app_handle: None,
         speech_queue: None,
         registry: Arc::new(crate::agents::AgentRegistry::default()),
+        hub: hub.clone(),
+        tours: crate::tours::TourEngine::new(hub, None, None),
     }
 }
 

@@ -4,3 +4,6 @@ dist/
 src-tauri/target/
 *.vsix
 .env
+
+vscode-extension/out
+*.vsix
