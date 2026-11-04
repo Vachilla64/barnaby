@@ -38,8 +38,8 @@ html, body {
    ========================================================================== */
 .pet-container {
   position: absolute;
-  width: 72px;
-  height: 64px;
+  width: 96px;
+  height: 132px;
   cursor: grab;
   transform-origin: center bottom;
   transition: transform 0.15s ease-out;
@@ -85,10 +85,10 @@ body.dragging * {
 
 @keyframes pet-breathe {
   0%, 100% {
-    transform: scale(1, 1);
+    transform: translateY(0);
   }
   50% {
-    transform: scale(1.03, 0.96) translateY(2px);
+    transform: translateY(3px);
   }
 }
 
@@ -101,8 +101,8 @@ body.dragging * {
   display: flex;
   align-items: center;
   justify-content: center;
-  top: -14px;
-  left: 27px;
+  top: -24px;
+  left: 39px;
   color: #fbbf24;
   animation: gear-spin 2s linear infinite;
 }
@@ -129,7 +129,8 @@ body.dragging * {
 .state-talking .mouth-open {
   display: block;
   animation: mouth-talk 0.2s ease-in-out infinite alternate;
-  transform-origin: 36px 40px;
+  transform-box: fill-box;
+  transform-origin: center top;
 }
 
 @keyframes pet-talk-bounce {
@@ -144,15 +145,14 @@ body.dragging * {
 
 /* 4. Thinking State */
 .state-thinking .eye-pupil {
-  transform: translate(2px, -3px);
-  transition: transform 0.3s ease;
+  transform: translate(0, -1px);
 }
 
 .state-thinking .thinking-dots {
   display: flex;
   gap: 3px;
-  top: -12px;
-  left: 26px;
+  top: -20px;
+  left: 37px;
 }
 
 .thinking-dots span {
@@ -181,8 +181,8 @@ body.dragging * {
   display: flex;
   align-items: center;
   justify-content: center;
-  top: -16px;
-  left: 27px;
+  top: -28px;
+  left: 39px;
   width: 18px;
   height: 18px;
   border-radius: 50%;
@@ -233,8 +233,8 @@ body.dragging * {
 }
 .state-sleeping .sleep-container {
   display: block;
-  top: -18px;
-  left: 45px;
+  top: -12px;
+  left: 66px;
 }
 
 .sleep-z {
@@ -733,4 +733,31 @@ body.settings-window {
   color: var(--text-muted);
   text-align: center;
   line-height: 1.5;
+}
+
+/* Barnaby pixel art: the SVG viewBox unit is one art pixel (3 screen px), so these offsets are in pixels */
+.monocle-ring {
+  filter: drop-shadow(0 0 0.7px #37e6f5);
+}
+.state-working .monocle-ring,
+.state-thinking .monocle-ring {
+  animation: monocle-glow 0.9s ease-in-out infinite alternate;
+}
+@keyframes monocle-glow {
+  from { filter: drop-shadow(0 0 0.4px #37e6f5); }
+  to { filter: drop-shadow(0 0 1.6px #9ffbff); }
+}
+.state-talking .pet-hat {
+  animation: hat-nod 0.44s steps(1) infinite alternate;
+}
+@keyframes hat-nod {
+  from { transform: translateY(0); }
+  to { transform: translateY(-1px); }
+}
+.state-happy .pet-hat,
+.state-alert .pet-hat {
+  transform: translateY(-1px);
+}
+.state-sleeping .pet-hat {
+  transform: translate(-1px, 1px);
 }
