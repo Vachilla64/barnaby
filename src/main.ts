@@ -278,6 +278,9 @@ async function main() {
   // Start region watcher for click-through
   initRegionWatcher();
 
+  // Everything mounted and listening: now the backend may show the overlay window.
+  await invoke("overlay_ready");
+
   // Initial welcome greeting
   setTimeout(() => {
     bubble.show("Hi! I'm Barnaby. Drag me anywhere!", [], 5000);

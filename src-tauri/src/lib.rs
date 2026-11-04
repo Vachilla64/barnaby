@@ -28,6 +28,18 @@ use voice::{
     VoiceState,
 };
 
+static OVERLAY_READY: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+const OVERLAY_READY_TIMEOUT_SECS: u64 = 10;
+
+/// Called by the overlay page once it has mounted. Only then is the overlay window shown.
+#[tauri::command]
+fn overlay_ready(app: tauri::AppHandle) {
+    OVERLAY_READY.store(true, std::sync::atomic::Ordering::SeqCst);
+    if let Some(w) = app.get_webview_window("overlay") {
+        let _ = w.show();
+    }
+}
+
 #[tauri::command]
 async fn ask_question(question: String, state: tauri::State<'_, Arc<server::ServerState>>) -> Result<(), String> {
     let st = state.inner().clone();
@@ -113,6 +125,7 @@ pub fn run() {
             overlay::save_pet_position,
             overlay::open_settings,
             overlay::exit_app,
+            overlay_ready,
             ask_question,
             accept_tour,
             tour_control,
@@ -246,7 +259,21 @@ pub fn run() {
             .always_on_top(true)
             .skip_taskbar(true)
             .shadow(false)
+            // Hidden until the page says it loaded. A failed load (for example the dev server
+            // being down) would otherwise cover the whole screen with a browser error page.
+            .visible(false)
             .build()?;
+
+            let watchdog_app = app.handle().clone();
+            tauri::async_runtime::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_secs(OVERLAY_READY_TIMEOUT_SECS)).await;
+                if !OVERLAY_READY.load(std::sync::atomic::Ordering::SeqCst) {
+                    tracing::error!("Overlay page did not load in {OVERLAY_READY_TIMEOUT_SECS}s; closing the overlay");
+                    if let Some(w) = watchdog_app.get_webview_window("overlay") {
+                        let _ = w.close();
+                    }
+                }
+            });
 
             // Ensure physical pixel matching across multi-monitor & high-DPI scaling
             let _ = overlay_window.set_position(tauri::Position::Physical(tauri::PhysicalPosition::new(bounds.x, bounds.y)));
