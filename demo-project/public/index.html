@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <title>Demo login</title>
+    <style>
+      body { font-family: system-ui, sans-serif; max-width: 320px; margin: 80px auto; }
+      input, button { display: block; width: 100%; margin: 8px 0; padding: 8px; box-sizing: border-box; }
+      #message { min-height: 1.5em; }
+    </style>
+  </head>
+  <body>
+    <h1>Sign in</h1>
+    <form id="login-form">
+      <input id="email" type="email" placeholder="Email" />
+      <input id="password" type="password" placeholder="Password" />
+      <button type="submit">Sign in</button>
+    </form>
+    <p id="message"></p>
+    <script>
+      // The login form: sends the email and password to POST /login and shows the reply.
+      document.getElementById("login-form").addEventListener("submit", async (event) => {
+        event.preventDefault();
+        const response = await fetch("/login", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            email: document.getElementById("email").value,
+            password: document.getElementById("password").value,
+          }),
+        });
+        const data = await response.json();
+        document.getElementById("message").textContent = data.message;
+      });
+    </script>
+  </body>
+</html>

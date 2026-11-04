@@ -72,8 +72,8 @@ Tick each task when it is done and verified (see AGENTS.md). Phases and their "D
 
 ## P7. Demo and submission
 - [ ] Read the hackathon's official rules: submission form, video length, repo requirements
-- [ ] README: install, connect agents, use
-- [ ] Demo project with a login form
+- [x] README: install, connect agents, use
+- [x] Demo project with a login form
 - [ ] Rehearse and record the demo (SPEC 2)
 - [ ] Submit before 2026-11-04 9:00 PM ET
 
@@ -93,3 +93,4 @@ Tick each task when it is done and verified (see AGENTS.md). Phases and their "D
 - 2026-11-04: P4 and P5 built. Verified with fakes, not the real services: a scripted OpenAI-style mock model (search tool, read_file tool, fenced JSON answer -> spoken answer plus tour offer) and a Node fake VS Code client over `/ws` (tour.step with clamped lines, missing file dropped, `next` control, auto-advance after speech, tour.end). NOT verified: a real Meta API key (none on this machine; `brain.base_url` in config.json can point at any OpenAI-compatible server, for example Ollama), the extension inside a real VS Code (not installed here; Antigravity is, and takes the same .vsix), the overlay bubble buttons by eye.
 - 2026-11-04: The local server falls back to ports 4748-4757 and saves the port it used. The Claude Connect hooks and the extension both read that port, so re-run Connect after a port change. A stale instance can hold 4747 for a few seconds after quit.
 - 2026-11-04: Install the extension with `code --install-extension vscode-extension/barnaby-vscode-0.1.0.vsix` (or Extensions > Install from VSIX). Rebuild with `pnpm package` in `vscode-extension/`.
+- 2026-11-04: Meta API facts (docs read 2026-11-04): chat completions at `POST https://api.meta.ai/v1/chat/completions`; only `tool_choice: "auto"`; send the full assistant message with `tool_calls` before the `tool` messages; `system` is accepted (`developer` preferred); `response_format: {type: "json_schema", json_schema: {name, schema}}` is supported (Barnaby does not use it yet, it asks for JSON in the prompt and validates); `stop`, `n>1`, `logprobs`, penalties are rejected; `reasoning_effort: "none"` is rejected. Transcription: `POST https://api.meta.ai/v1/asr/transcribe`, multipart with a JSON part `request` (`{"mode":"PUSH_TO_TALK","model":"muse-voice-transcribe-1.0","audioEncoding":"WAV"}`) and an `audio` part; WAV only, mono, 16-bit PCM, 16 or 24 kHz; reply `{"transcript": "..."}`.
