@@ -5,7 +5,7 @@ export function initSettingsView(container: HTMLElement): void {
   container.innerHTML = `
     <div class="settings-container">
       <header class="settings-header">
-        <h2>Devy Settings</h2>
+        <h2>Barnaby Settings</h2>
         <span class="settings-badge">v0.1.0</span>
       </header>
 
@@ -66,9 +66,11 @@ export function initSettingsView(container: HTMLElement): void {
                 </select>
               </div>
               <div class="voice-agent-item">
-                <span>Oscar / Devy</span>
-                <select id="voice-devy" class="select-voice">
+                <span>Barnaby</span>
+                <select id="voice-barnaby" class="select-voice">
                   <option value="Toby">Toby (British)</option>
+                  <option value="Master Aldric">Master Aldric (old British wizard)</option>
+                  <option value="Sir Bramwell">Sir Bramwell (pompous English knight)</option>
                   <option value="Alfie">Alfie (British)</option>
                   <option value="Freya">Freya</option>
                   <option value="Easton">Easton</option>
@@ -99,7 +101,7 @@ export function initSettingsView(container: HTMLElement): void {
         <!-- 4. Connect Coding Agents -->
         <section class="settings-card">
           <label class="card-title">Connect Coding Agents</label>
-          <p class="card-desc">Devy hooks into your terminal agents to speak status messages and guide you.</p>
+          <p class="card-desc">Barnaby hooks into your terminal agents to speak status messages and guide you.</p>
           <div class="agents-grid">
             <div class="agent-connect-card">
               <span class="agent-name">Claude Code</span>
@@ -148,12 +150,12 @@ export function initSettingsView(container: HTMLElement): void {
       const voices = cfg.voice.voices || {};
       const claudeSel = document.getElementById("voice-claude") as HTMLSelectElement;
       const geminiSel = document.getElementById("voice-gemini") as HTMLSelectElement;
-      const devySel = document.getElementById("voice-devy") as HTMLSelectElement;
+      const barnabySel = document.getElementById("voice-barnaby") as HTMLSelectElement;
       const otherSel = document.getElementById("voice-other") as HTMLSelectElement;
 
       if (claudeSel && voices["claude-code"]) claudeSel.value = voices["claude-code"];
       if (geminiSel && voices["gemini-cli"]) geminiSel.value = voices["gemini-cli"];
-      if (devySel && voices["devy"]) devySel.value = voices["devy"];
+      if (barnabySel && voices["barnaby"]) barnabySel.value = voices["barnaby"];
       if (otherSel && voices["other"]) otherSel.value = voices["other"];
 
       // Render projects
@@ -191,7 +193,7 @@ export function initSettingsView(container: HTMLElement): void {
   };
   bindVoiceSelect("voice-claude", "claude-code");
   bindVoiceSelect("voice-gemini", "gemini-cli");
-  bindVoiceSelect("voice-devy", "devy");
+  bindVoiceSelect("voice-barnaby", "barnaby");
   bindVoiceSelect("voice-other", "other");
 
   // Phonon Status Poller & Action Renderer
@@ -223,7 +225,7 @@ export function initSettingsView(container: HTMLElement): void {
       btn.className = "btn btn-outline btn-sm";
       btn.textContent = "Install uv Package Manager";
       btn.onclick = async () => {
-        if (confirm("Devy needs the uv package manager to run Phonon TTS. Install now?")) {
+        if (confirm("Barnaby needs the uv package manager to run Phonon TTS. Install now?")) {
           btn.disabled = true;
           btn.textContent = "Installing uv...";
           try {
@@ -279,16 +281,43 @@ export function initSettingsView(container: HTMLElement): void {
   pollPhononStatus();
   const pollInterval = setInterval(pollPhononStatus, 2500);
 
+  // Connect Claude Code: show exactly what changes, then ask (AGENTS.md rule).
+  const connectBtn = document.getElementById("connect-claude-btn") as HTMLButtonElement | null;
+  if (connectBtn) {
+    connectBtn.addEventListener("click", async () => {
+      try {
+        const preview = await invoke<string>("connect_preview_claude");
+        if (!confirm(preview)) return;
+        connectBtn.disabled = true;
+        connectBtn.textContent = "Connecting...";
+        const result = await invoke<string>("connect_claude");
+        connectBtn.textContent = "Connected";
+        alert(result);
+      } catch (e) {
+        connectBtn.disabled = false;
+        connectBtn.textContent = "Connect";
+        alert(`${e}`);
+      }
+    });
+  }
+
+  const geminiBtn = document.getElementById("connect-gemini-btn") as HTMLButtonElement | null;
+  if (geminiBtn) {
+    geminiBtn.addEventListener("click", () => {
+      alert("Gemini CLI: add this to ~/.gemini/settings.json under mcpServers (see README). The automatic button is cut from the hackathon scope.");
+    });
+  }
+
   // Copy instructions snippet button (SPEC 5.4.4)
   const copyBtn = document.getElementById("copy-snippet-btn");
   if (copyBtn) {
     copyBtn.addEventListener("click", () => {
-      const snippet = `## Devy (desktop pet)
-A desktop pet reads your progress to the user out loud. Use the \`devy\` MCP tools:
-- devy_status at the start of a task, at each milestone, and when blocked. One short spoken sentence.
-- devy_done when the task is finished: what changed, in plain words.
-- devy_ask_user instead of stopping when you need a quick decision.
-- devy_tour when the user asks you to walk them through code you wrote.
+      const snippet = `## Barnaby (desktop pet)
+A desktop pet reads your progress to the user out loud. Use the \`barnaby\` MCP tools:
+- barnaby_status at the start of a task, at each milestone, and when blocked. One short spoken sentence.
+- barnaby_done when the task is finished: what changed, in plain words.
+- barnaby_ask_user instead of stopping when you need a quick decision.
+- barnaby_tour when the user asks you to walk them through code you wrote.
 Never put secrets or long code in these calls.`;
 
       navigator.clipboard.writeText(snippet);

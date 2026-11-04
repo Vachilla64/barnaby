@@ -1,7 +1,7 @@
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
-import { AppConfig } from "./types";
+import { AppConfig, PetState } from "./types";
 import { PetComponent } from "./pet";
 import { SpeechBubbleComponent } from "./bubble";
 import { PetMenuManager } from "./menu";
@@ -184,6 +184,14 @@ async function main() {
     feedManager.addItem(text);
   });
 
+  // Agent link (P3): hooks and MCP tools move the pet between states
+  await listen<{ agent_kind: string; state: string; text?: string | null }>("agent:state", (event) => {
+    const { state, text } = event.payload;
+    if (pet.state === "talking" && state !== "alert") return;
+    pet.setState(state as PetState);
+    if (text) feedManager.addItem(text);
+  });
+
   // Fallback for direct pet:say events
   await listen<{ agent_kind?: string; text: string }>("pet:say", (event) => {
     const text = event.payload.text;
@@ -206,8 +214,8 @@ async function main() {
 
   // Initial welcome greeting
   setTimeout(() => {
-    bubble.show("Hi! I'm Devy. Drag me anywhere!", [], 5000);
-    feedManager.addItem("Devy started");
+    bubble.show("Hi! I'm Barnaby. Drag me anywhere!", [], 5000);
+    feedManager.addItem("Barnaby started");
     updateClickRegions();
   }, 300);
 }

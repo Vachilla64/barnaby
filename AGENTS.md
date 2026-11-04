@@ -1,6 +1,6 @@
 # Instructions for coding agents
 
-You are building **Devy**, a Windows desktop pet app that speaks for coding agents and walks the user through their own codebase. The full product spec is [docs/SPEC.md](docs/SPEC.md). Read it completely before writing code. Progress lives in [docs/TASKS.md](docs/TASKS.md).
+You are building **Barnaby**, a Windows desktop pet app that speaks for coding agents and walks the user through their own codebase. The full product spec is [docs/SPEC.md](docs/SPEC.md). Read it completely before writing code. Progress lives in [docs/TASKS.md](docs/TASKS.md).
 
 ## How to work
 
@@ -9,11 +9,11 @@ You are building **Devy**, a Windows desktop pet app that speaks for coding agen
 3. **After each task**, tick it in `docs/TASKS.md`. Add a short note under "Notes" if you learned something the next agent needs (an API detail, a workaround, a decision).
 4. **Commit after each phase** (and after any large task) with a message like `P2: speech queue with throttle`. Push to `origin main`.
 5. **Type-check often:** `cargo check` in `src-tauri`, `npx tsc --noEmit` in the frontend and in `vscode-extension`.
-6. **The running exe is locked.** Close Devy before a full rebuild, and rebuild before asking the user to test. Never report a feature as done after only compiling.
+6. **The running exe is locked.** Close Barnaby before a full rebuild, and rebuild before asking the user to test. Never report a feature as done after only compiling.
 7. **Test what is pure** (command matcher, sentence splitter, throttle, hook mapping, tour validation) with `cargo test`. Test the desktop behaviour by hand, with the user driving. **Never move the user's mouse or type into their windows** to test.
 8. **If the spec is unclear or wrong**, pick the simplest option that serves the demo story (SPEC section 2), write the decision under "Notes" in TASKS.md, and keep going. Ask the user only when the choice is expensive to undo.
-9. **Speak progress updates mid-stream**: During long stretches of work (compilations, large dependency downloads, multi-step debugging, long file indexing), speak concise progress updates to the user even while not done (fire-and-forget via Pocket-TTS `speak.ps1` with `WaitMsBeforeAsync: 500`), then immediately continue working. Never leave the user in prolonged silence.
-10. **Oscar / Devy Spoken Updates**: Devy himself speaks updates periodically to keep the user informed during long agent tasks (throttled, clear, conversational). Oscar's native voice is a British male voice from Phonon defaults (`Toby` or `Alfie`).
+9. **Time is short (deadline 2am).** Tick TASKS.md in batches, not per task. Commit per phase. Hand-test once per phase, not per task. No spoken progress updates while building.
+10. Barnaby's voice is a British male voice from Phonon's catalog (`Toby` by default; `Master Aldric` and `Sir Bramwell` suit the old-gentleman character). The product speaks for agents; the build process does not need to.
 
 ## Rules
 
@@ -30,6 +30,6 @@ You are building **Devy**, a Windows desktop pet app that speaks for coding agen
 
 ## Useful facts
 
-- Phonon TTS is installed on the dev machine as a uv tool (`ptts`). The server script is `resources/phonon/phonon_server.py`. Run it by hand with `uv tool run --from ptts python resources/phonon/phonon_server.py`. It listens on `127.0.0.1:8001`; first start takes about 2 minutes. Oscar/Devy's default voice is a British male voice from Phonon's default catalog (`Toby`).
+- Phonon TTS is installed on the dev machine as a uv tool (`ptts`). The server script is `resources/phonon/phonon_server.py`. Run it by hand with `uv tool run --from ptts python resources/phonon/phonon_server.py`. It listens on `127.0.0.1:8001`; first start takes about 2 minutes. Barnaby's default voice is a British male voice from Phonon's default catalog (`Toby`).
 - Meta Model API: base `https://api.meta.ai/v1`, `Authorization: Bearer $MODEL_API_KEY`, model `muse-spark-1.3`, OpenAI-compatible Chat Completions. Docs: https://dev.meta.ai/docs/
 - Hackathon deadline: **2026-11-04, 9:00 PM ET**. Scope cuts are listed at the end of SPEC section 9.

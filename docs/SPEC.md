@@ -1,6 +1,6 @@
-# Devy: product spec
+# Barnaby: product spec
 
-Devy is a Windows desktop app that puts a small animated pet on screen for each AI coding agent you run (Claude Code, Gemini CLI, Antigravity). The agents tell their pet what they are doing, and the pet tells you, out loud. You can also ask a pet about your own codebase: it explains the code, out loud and in VS Code, opening files and highlighting lines as it talks, as if you were walking through the code yourself.
+Barnaby is a Windows desktop app that puts a small animated pet on screen for each AI coding agent you run (Claude Code, Gemini CLI, Antigravity). The agents tell their pet what they are doing, and the pet tells you, out loud. You can also ask a pet about your own codebase: it explains the code, out loud and in VS Code, opening files and highlighting lines as it talks, as if you were walking through the code yourself.
 
 Built for the Meta Global AI Developer Hackathon (indie track). **Submissions close 2026-11-04, 9:00 PM ET.** Scope is cut to fit that deadline. See [Phases](#9-phases-and-acceptance-criteria).
 
@@ -13,7 +13,7 @@ People who build with coding agents ("vibe coding") hit two walls:
 1. **They lose track of what the agents are doing.** Agents run in terminals that are hidden behind other windows. You find out the agent stopped 20 minutes ago to ask for a permission.
 2. **They stop understanding their own codebase.** The agent wrote most of it. When something breaks, the person no longer knows where anything lives.
 
-Devy fixes both with a companion that is always on screen, speaks, and knows the code.
+Barnaby fixes both with a companion that is always on screen, speaks, and knows the code.
 
 ## 2. Users and the demo story
 
@@ -21,7 +21,7 @@ Devy fixes both with a companion that is always on screen, speaks, and knows the
 
 **The demo (about 2 minutes) must show, in this order:**
 
-1. Devy is running. Two pets sit on the bottom edge of the screen: Claude's (orange) and Gemini's (blue).
+1. Barnaby is running. Two pets sit on the bottom edge of the screen: Claude's (orange) and Gemini's (blue).
 2. The user gives Claude Code a task in a terminal and switches to the browser. Claude's pet says "Starting on the login form" and later "Done. I added a form and a validation helper."
 3. Claude needs a permission. Its pet bounces and says "Claude needs your approval in the terminal."
 4. The user holds the push-to-talk key and asks Gemini's pet: "Where is the login validation handled?"
@@ -40,10 +40,10 @@ Everything that does not serve this story is out of scope.
 | Agent link | **MCP server** (Streamable HTTP) **plus HTTP hook endpoints**, both on one local server |
 | Pets | **One pet per connected agent**, each with its own colour and voice |
 | Pet art | Drawn in code (SVG and CSS), no image assets |
-| Voice out | **Phonon TTS** (`ptts`, model `gradium/phonon-31m-en`), run locally by Devy |
+| Voice out | **Phonon TTS** (`ptts`, model `gradium/phonon-31m-en`), run locally by Barnaby |
 | Voice in | Push-to-talk, transcribed by Meta's `muse-voice-transcribe-1.0` |
-| Brain | **Muse Spark** (`muse-spark-1.3`) through the Meta Model API. Devy asks it directly; it does not relay questions to the coding agents |
-| Code walkthrough | A VS Code extension that Devy drives over a WebSocket |
+| Brain | **Muse Spark** (`muse-spark-1.3`) through the Meta Model API. Barnaby asks it directly; it does not relay questions to the coding agents |
+| Code walkthrough | A VS Code extension that Barnaby drives over a WebSocket |
 | Existing code | The pure-Rust prototype in `prototype/` is reference only. Port ideas, not code |
 
 ## 4. Architecture
@@ -53,7 +53,7 @@ Everything that does not serve this story is out of scope.
  Gemini CLI  ─┼──────────────────────────────┐
  Antigravity ─┘                              ▼
                               ┌────────────────────────────────┐
-                              │ Devy app (Tauri 2, Rust)       │
+                              │ Barnaby app (Tauri 2, Rust)       │
    Meta Model API ◀── HTTPS ──│  local server 127.0.0.1:4747   │
    (Muse Spark, transcribe)   │   /mcp  /api/v1/*  /ws         │
                               │  agents · brain · tours · voice│
@@ -91,15 +91,15 @@ Everything that does not serve this story is out of scope.
 
 | Process | Port | Started by |
 | :-- | :-- | :-- |
-| Devy app | `127.0.0.1:4747` (HTTP + WebSocket) | the user |
-| Phonon TTS server | `127.0.0.1:8001` | Devy, if the port is not already answering `GET /health` |
+| Barnaby app | `127.0.0.1:4747` (HTTP + WebSocket) | the user |
+| Phonon TTS server | `127.0.0.1:8001` | Barnaby, if the port is not already answering `GET /health` |
 | VS Code extension | client only | VS Code |
 
 Bind to `127.0.0.1` only, never `0.0.0.0`. If 4747 is taken, try 4748 to 4757 and write the port used to the settings file.
 
 ### 4.3 Local auth
 
-On first run Devy creates a random 32-byte token (hex) and stores it in `%APPDATA%\Devy\config.json`. Every request to `/mcp`, `/api/v1/*` and `/ws` must send `Authorization: Bearer <token>`, or `?token=<token>` for the WebSocket. `GET /health` needs no token. Reject anything else with 401. This stops web pages in the user's browser from driving the pet.
+On first run Barnaby creates a random 32-byte token (hex) and stores it in `%APPDATA%\Barnaby\config.json`. Every request to `/mcp`, `/api/v1/*` and `/ws` must send `Authorization: Bearer <token>`, or `?token=<token>` for the WebSocket. `GET /health` needs no token. Reject anything else with 401. This stops web pages in the user's browser from driving the pet.
 
 ## 5. Components
 
@@ -120,8 +120,8 @@ Follow [PLAYBOOK.md](PLAYBOOK.md) sections "The shape of the solution" and "How 
 
 A normal small window (640×560), opened from the tray icon or the pet menu. Sections:
 
-1. **Meta API key:** password field, `Test` button (calls the API with a 5-token prompt), saved in Windows Credential Manager (`keyring` crate, service `Devy`).
-2. **Voice:** status of Phonon (`installing / starting / ready / failed`), voice per agent kind (defaults: Claude `Freya`, Gemini `Easton`, Oscar/Devy `Toby` (British male default), other agents `Toby`), volume, mute all.
+1. **Meta API key:** password field, `Test` button (calls the API with a 5-token prompt), saved in Windows Credential Manager (`keyring` crate, service `Barnaby`).
+2. **Voice:** status of Phonon (`installing / starting / ready / failed`), voice per agent kind (defaults: Claude `Freya`, Gemini `Easton`, Barnaby `Toby` (British male default), other agents `Toby`), volume, mute all.
 3. **Push-to-talk key:** default `Ctrl+Alt+Space` (hold to talk).
 4. **Connect agents:** for Claude Code and Gemini CLI, a `Connect` button that runs the setup in [5.4](#54-agent-link-mcp-and-hooks), and a `Copy instructions` button that copies the snippet from [5.4.4](#544-instructions-snippet-for-the-agents-memory-file).
 5. **Projects:** list of known project folders (added automatically by the VS Code extension or MCP calls, or by `Add folder`).
@@ -129,15 +129,15 @@ A normal small window (640×560), opened from the tray icon or the pet menu. Sec
 
 ### 5.3 Voice out: Phonon
 
-Oscar/Devy speaks with a British male voice from the default Phonon catalog (`Toby` - crisp, attentive, conversational British English).
-Devy speaks periodic status updates during long agent tasks mid-stream so the user is never left in silence, while using the speech queue throttle to stay polite and concise.
+Barnaby speaks with a British male voice from the default Phonon catalog (`Toby` - crisp, attentive, conversational British English).
+Barnaby speaks periodic status updates during long agent tasks mid-stream so the user is never left in silence, while using the speech queue throttle to stay polite and concise.
 
 **Setup on first run** (Rust `voice/phonon.rs`), shown as a progress line in settings and spoken by nobody until done:
 
 1. If `GET http://127.0.0.1:8001/health` answers `ok`, use it and stop here.
 2. Find `uv` (`where uv`). If missing, install it: `powershell -ExecutionPolicy ByPass -c "irm https://astral.sh/uv/install.ps1 | iex"`. Ask the user first, in the settings window, with an `Install` button. Never install anything silently.
 3. If `uv tool list` does not show `ptts`, run `uv tool install ptts`.
-4. Start the server as a hidden child process (`CREATE_NO_WINDOW`): `uv tool run --from ptts python <resource dir>/phonon/phonon_server.py`. Kill it when Devy quits (Windows Job Object so it dies even on a crash).
+4. Start the server as a hidden child process (`CREATE_NO_WINDOW`): `uv tool run --from ptts python <resource dir>/phonon/phonon_server.py`. Kill it when Barnaby quits (Windows Job Object so it dies even on a crash).
 5. Poll `/health` every second for up to 180 s. The first start downloads and loads the model, which takes about 2 minutes. After that it is cached.
 
 **Synthesis:** `POST /tts` with form fields `text` and `voice_url` (the voice name, for example `Freya`). The reply is a streamed WAV, 24 kHz, mono, 16-bit. First audio arrives in about 50 ms.
@@ -164,40 +164,40 @@ An agent is one connected coding-agent session. Fields: `id` (MCP session id, or
 
 Streamable HTTP transport at `POST /mcp` (JSON-RPC 2.0, MCP protocol `2025-06-18` or newer). Use the `rmcp` crate if it fits the axum server; otherwise implement `initialize`, `tools/list` and `tools/call` by hand (that is all that is needed). Tools:
 
-| Tool | Input | What Devy does | Returns |
+| Tool | Input | What Barnaby does | Returns |
 | :-- | :-- | :-- | :-- |
-| `devy_status` | `summary` (≤ 25 words), `phase`: `planning \| working \| testing \| blocked \| done`, `project_root?` | Pet state from phase; add to feed; speak at `normal` priority (throttled) | `"ok"` |
-| `devy_say` | `text` (≤ 60 words), `urgent?` bool | Speak, `high` if urgent | `"ok"` |
-| `devy_done` | `summary` (≤ 40 words), `files_changed?` [paths] | `happy` state, speak at `high` | `"ok"` |
-| `devy_ask_user` | `question`, `options?` [strings, ≤ 4] | Speak the question, show options as bubble buttons, wait up to 5 min for a click or spoken answer | the answer text, or `"no answer"` |
-| `devy_tour` | `title`, `steps`: [`{path, start_line, end_line, narration}`] (≤ 12) | Start a code tour ([5.7](#57-tours)) | `"started"` |
+| `barnaby_status` | `summary` (≤ 25 words), `phase`: `planning \| working \| testing \| blocked \| done`, `project_root?` | Pet state from phase; add to feed; speak at `normal` priority (throttled) | `"ok"` |
+| `barnaby_say` | `text` (≤ 60 words), `urgent?` bool | Speak, `high` if urgent | `"ok"` |
+| `barnaby_done` | `summary` (≤ 40 words), `files_changed?` [paths] | `happy` state, speak at `high` | `"ok"` |
+| `barnaby_ask_user` | `question`, `options?` [strings, ≤ 4] | Speak the question, show options as bubble buttons, wait up to 5 min for a click or spoken answer | the answer text, or `"no answer"` |
+| `barnaby_tour` | `title`, `steps`: [`{path, start_line, end_line, narration}`] (≤ 12) | Start a code tour ([5.7](#57-tours)) | `"started"` |
 
-Tool descriptions must tell the model when to call them, for example: "Call devy_status when you start a task, at each milestone, and when you are blocked. Keep summaries short and spoken-style. Do not call it more than once a minute."
+Tool descriptions must tell the model when to call them, for example: "Call barnaby_status when you start a task, at each milestone, and when you are blocked. Keep summaries short and spoken-style. Do not call it more than once a minute."
 
 #### 5.4.3 Hooks (`server/hooks.rs`)
 
 `POST /api/v1/hooks/{kind}` takes the hook's JSON payload as the body unchanged. Map:
 
-| Claude Code hook | Devy reaction |
+| Claude Code hook | Barnaby reaction |
 | :-- | :-- |
 | `SessionStart` | Register agent, pet wakes up, no speech |
 | `UserPromptSubmit` | State `working`, no speech |
 | `Notification` (permission or waiting for input) | State `alert`, speak at `high`: "Claude needs your approval in the terminal." / "Claude is waiting for you." |
 | `PostToolUse` with `Edit`, `Write`, `MultiEdit` | Add "edited `<file>`" to feed, no speech |
-| `Stop` | State `idle`; if no `devy_done` came in the last 30 s, speak "Claude has finished." |
+| `Stop` | State `idle`; if no `barnaby_done` came in the last 30 s, speak "Claude has finished." |
 | `SessionEnd` | State `sleeping` |
 
 Gemini CLI: check its current hooks documentation and map the equivalent events. If it has no hooks, MCP alone is enough.
 
 **Connect button for Claude Code** (writes config; show the user exactly what will change and ask before writing):
 
-- MCP: run `claude mcp add --transport http --scope user devy http://127.0.0.1:4747/mcp --header "Authorization: Bearer <token>"`.
+- MCP: run `claude mcp add --transport http --scope user barnaby http://127.0.0.1:4747/mcp --header "Authorization: Bearer <token>"`.
 - Hooks: merge into `%USERPROFILE%\.claude\settings.json` under `hooks`, one entry per event above, each a command hook:
   `curl -s -m 2 -X POST http://127.0.0.1:4747/api/v1/hooks/claude-code -H "Authorization: Bearer <token>" -H "Content-Type: application/json" --data-binary @-`
-  (`curl` ships with Windows 10+. `-m 2` keeps a closed Devy from slowing the agent down.) Keep existing hooks; never overwrite the file.
+  (`curl` ships with Windows 10+. `-m 2` keeps a closed Barnaby from slowing the agent down.) Keep existing hooks; never overwrite the file.
 
 **Connect button for Gemini CLI:** merge into `%USERPROFILE%\.gemini\settings.json`:
-`"mcpServers": {"devy": {"httpUrl": "http://127.0.0.1:4747/mcp", "headers": {"Authorization": "Bearer <token>"}}}`.
+`"mcpServers": {"barnaby": {"httpUrl": "http://127.0.0.1:4747/mcp", "headers": {"Authorization": "Bearer <token>"}}}`.
 
 **Antigravity:** document the manual MCP setup in the README; no button.
 
@@ -206,12 +206,12 @@ Gemini CLI: check its current hooks documentation and map the equivalent events.
 Copied by the `Copy instructions` button, for the user to paste into `CLAUDE.md`, `GEMINI.md` or `AGENTS.md`:
 
 ```
-## Devy (desktop pet)
-A desktop pet reads your progress to the user out loud. Use the `devy` MCP tools:
-- devy_status at the start of a task, at each milestone, and when blocked. One short spoken sentence.
-- devy_done when the task is finished: what changed, in plain words.
-- devy_ask_user instead of stopping when you need a quick decision.
-- devy_tour when the user asks you to walk them through code you wrote.
+## Barnaby (desktop pet)
+A desktop pet reads your progress to the user out loud. Use the `barnaby` MCP tools:
+- barnaby_status at the start of a task, at each milestone, and when blocked. One short spoken sentence.
+- barnaby_done when the task is finished: what changed, in plain words.
+- barnaby_ask_user instead of stopping when you need a quick decision.
+- barnaby_tour when the user asks you to walk them through code you wrote.
 Never put secrets or long code in these calls.
 ```
 
@@ -219,7 +219,7 @@ Never put secrets or long code in these calls.
 
 **API** (verified 2026-11-03 from dev.meta.ai docs):
 
-- Base URL `https://api.meta.ai/v1`, header `Authorization: Bearer <key>`. Env var name in Meta's docs: `MODEL_API_KEY` (Devy reads it as a fallback if no key is saved).
+- Base URL `https://api.meta.ai/v1`, header `Authorization: Bearer <key>`. Env var name in Meta's docs: `MODEL_API_KEY` (Barnaby reads it as a fallback if no key is saved).
 - Use the **OpenAI-compatible Chat Completions** endpoint (`POST /chat/completions`) with `model: "muse-spark-1.3"`, tools, and streaming. Check the Chat Completions and Tool calling reference pages before writing the client and note any differences in `docs/TASKS.md`.
 - Context window: 1,048,576 tokens. Price per million tokens: $1.25 input, $0.15 cached input, $4.25 output.
 - Model id is a setting (`brain.model`), so it can switch to `muse-spark-1.3-contributor` (cheaper) or `muse-wonder-1.0`.
@@ -254,7 +254,7 @@ Never put secrets or long code in these calls.
 
 **System prompt (starting point):**
 
-> You are Devy, a friendly guide who explains a codebase to the person who owns it. They may not have written most of it. Answer in plain spoken English, as if talking next to them: short sentences, no markdown, no code read aloud, file names said simply ("the validate file in auth"). Only state what the code shows; read files when unsure. When the answer lives in specific places, return a tour: an ordered walk through the files, each step with a narration of one to three sentences that says what this piece does and how it connects to the next.
+> You are Barnaby, a friendly guide who explains a codebase to the person who owns it. They may not have written most of it. Answer in plain spoken English, as if talking next to them: short sentences, no markdown, no code read aloud, file names said simply ("the validate file in auth"). Only state what the code shows; read files when unsure. When the answer lives in specific places, return a tour: an ordered walk through the files, each step with a narration of one to three sentences that says what this piece does and how it connects to the next.
 
 **Pet voice:** questions are answered by the pet the user clicked or spoke to; any pet can answer about any project. If several projects are known, use the one open in VS Code; else the most recent one.
 
@@ -265,12 +265,12 @@ Never put secrets or long code in these calls.
 - The nearest pet to the cursor shows `thinking` while listening and transcribing. If the user clicked a pet in the last 10 s, that pet answers instead.
 - Transcribe with `muse-voice-transcribe-1.0`. Check Meta's docs for the endpoint (probably OpenAI-style `POST /audio/transcriptions`) and accepted formats; convert to WAV 16 kHz mono in Rust if needed.
 - Pressing push-to-talk stops any speech at once (barge-in).
-- **Command words first:** before sending to the brain, match the text against tour and control commands: `next`, `back`, `previous`, `stop`, `pause`, `continue`, `repeat`, `mute`, `be quiet`, and answers to an open `devy_ask_user`. Only claim a sentence when it really is a command (whole utterance, or starts with the command word and is under 5 words). Otherwise it is a question for the brain. This matcher is pure Rust and must have unit tests.
+- **Command words first:** before sending to the brain, match the text against tour and control commands: `next`, `back`, `previous`, `stop`, `pause`, `continue`, `repeat`, `mute`, `be quiet`, and answers to an open `barnaby_ask_user`. Only claim a sentence when it really is a command (whole utterance, or starts with the command word and is under 5 words). Otherwise it is a question for the brain. This matcher is pure Rust and must have unit tests.
 - Fallback when no key or transcription fails: the pet says "I didn't catch that" and opens the `Ask…` text box.
 
 ### 5.7 Tours (`tours.rs` and the VS Code extension)
 
-A tour is a list of steps `{path, start_line, end_line, narration}` from the brain or from `devy_tour`. The tour engine runs one tour at a time:
+A tour is a list of steps `{path, start_line, end_line, narration}` from the brain or from `barnaby_tour`. The tour engine runs one tour at a time:
 
 1. Send `tour.step` to VS Code. Wait for `tour.step.shown` (timeout 3 s; go on anyway).
 2. Speak the narration (`tour` kind). Bubble shows `Back` `Next` `Stop`.
@@ -283,10 +283,10 @@ If VS Code is not connected, the tour still runs: the bubble shows `path:start_l
 
 TypeScript, `engines.vscode` `^1.90.0`, activates on startup (`onStartupFinished`). Packaged with `vsce package` to a `.vsix` the user installs by hand.
 
-- **Connection:** reads the port and token from `%APPDATA%\Devy\config.json`. Connects to `ws://127.0.0.1:<port>/ws?token=...`, reconnects every 3 s. Status bar item: `$(hubot) Devy` (green when connected, grey when not).
-- **On connect** it sends `hello {workspace_folders, vscode_version}`; Devy adds the folders as projects.
+- **Connection:** reads the port and token from `%APPDATA%\Barnaby\config.json`. Connects to `ws://127.0.0.1:<port>/ws?token=...`, reconnects every 3 s. Status bar item: `$(hubot) Barnaby` (green when connected, grey when not).
+- **On connect** it sends `hello {workspace_folders, vscode_version}`; Barnaby adds the folders as projects.
 - **Context:** sends `editor.context {path, selection_text (≤ 4000 chars), start_line, end_line, cursor_line}` on selection change (debounced 300 ms).
-- **Commands:** `Devy: Ask about this` (input box, sends `ask {question}` with the context), `Devy: Next step`, `Devy: Previous step`, `Devy: Stop tour`. Keybindings: `Alt+]`, `Alt+[`, `Alt+Escape`.
+- **Commands:** `Barnaby: Ask about this` (input box, sends `ask {question}` with the context), `Barnaby: Next step`, `Barnaby: Previous step`, `Barnaby: Stop tour`. Keybindings: `Alt+]`, `Alt+[`, `Alt+Escape`.
 - **`tour.step` handler** (the "walking through the code" feeling):
   1. Open the file in the main editor group (`preserveFocus: false`, `preview: true`).
   2. Smooth scroll: reveal the line 10 lines above `start_line`, then step the visible range down by 2 lines every 30 ms until `start_line` is near the top third (`revealRange` with `InCenterIfOutsideViewport`).
@@ -298,9 +298,9 @@ TypeScript, `engines.vscode` `^1.90.0`, activates on startup (`onStartupFinished
 
 JSON messages, each `{ "type": string, ...fields }`.
 
-Devy → VS Code: `tour.step {tour_id, index, total, path, start_line, end_line, colour}`, `tour.end {tour_id}`.
+Barnaby → VS Code: `tour.step {tour_id, index, total, path, start_line, end_line, colour}`, `tour.end {tour_id}`.
 
-VS Code → Devy: `hello {...}`, `editor.context {...}`, `ask {question}`, `tour.step.shown {tour_id, index}`, `tour.control {action: next|back|stop|pause|resume}`.
+VS Code → Barnaby: `hello {...}`, `editor.context {...}`, `ask {question}`, `tour.step.shown {tour_id, index}`, `tour.control {action: next|back|stop|pause|resume}`.
 
 Paths are absolute Windows paths on the wire.
 
@@ -316,14 +316,14 @@ Paths are absolute Windows paths on the wire.
 
 ## 6. Config file
 
-`%APPDATA%\Devy\config.json` (the API key is **not** in it):
+`%APPDATA%\Barnaby\config.json` (the API key is **not** in it):
 
 ```json
 {
   "port": 4747,
   "token": "hex...",
   "brain": {"model": "muse-spark-1.3"},
-  "voice": {"enabled": true, "volume": 0.9, "voices": {"claude-code": "Freya", "gemini-cli": "Easton", "devy": "Toby", "other": "Toby"}},
+  "voice": {"enabled": true, "volume": 0.9, "voices": {"claude-code": "Freya", "gemini-cli": "Easton", "barnaby": "Toby", "other": "Toby"}},
   "push_to_talk": "Ctrl+Alt+Space",
   "pets": {"claude-code": {"colour": "#E8875B", "x": null, "y": null}, "gemini-cli": {"colour": "#5B8DEF", "x": null, "y": null}},
   "projects": ["C:\\Users\\me\\code\\my-app"]
@@ -340,7 +340,7 @@ Paths are absolute Windows paths on the wire.
 | Phonon failed to start | Bubble only: "Voice is off: Phonon didn't start. See settings." |
 | Port in use by another app | Settings shows the error and the port that was used instead |
 
-Log everything to `%APPDATA%\Devy\logs\devy.log` (`tracing` with a rolling file appender).
+Log everything to `%APPDATA%\Barnaby\logs\barnaby.log` (`tracing` with a rolling file appender).
 
 ## 8. Out of scope (for the hackathon)
 
@@ -357,15 +357,15 @@ Each phase must build, run and be committed before the next starts. Track progre
 *Done when:* clicks pass through everywhere except the pet; the pet can be dragged; `POST /api/v1/say` shows text in the bubble; closing the overlay never leaves a window that eats clicks.
 
 **P2. Voice out.** Phonon setup flow, sidecar, speech queue with throttle and priorities, mouth animation, mute.
-*Done when:* `POST /api/v1/say` is heard within 1 s once Phonon is ready; two quick `say` calls play one after the other, not on top of each other; quitting Devy kills the Phonon process.
+*Done when:* `POST /api/v1/say` is heard within 1 s once Phonon is ready; two quick `say` calls play one after the other, not on top of each other; quitting Barnaby kills the Phonon process.
 
 **P3. Agent link.** MCP server with the five tools, hook endpoint, agent registry, one pet per agent kind, Connect buttons, instructions snippet.
-*Done when:* after `Connect` for Claude Code, a real Claude Code session shows its own orange pet, `devy_status` calls are spoken, a permission prompt makes the pet alert and say so, and `Stop` is announced.
+*Done when:* after `Connect` for Claude Code, a real Claude Code session shows its own orange pet, `barnaby_status` calls are spoken, a permission prompt makes the pet alert and say so, and `Stop` is announced.
 
 **P4. Brain.** API key in settings, Muse Spark client, repo index, ask flow with tools and JSON answer, `Ask…` text box.
 *Done when:* typing "where is the server started?" about this repo gives a correct spoken answer and a tour with real paths and line numbers.
 
-**P5. VS Code extension and tours.** Extension, WebSocket, tour engine, step controls, `devy_tour` tool.
+**P5. VS Code extension and tours.** Extension, WebSocket, tour engine, step controls, `barnaby_tour` tool.
 *Done when:* a tour from P4 opens each file in VS Code, scrolls smoothly, highlights the range in the pet's colour in step with the voice, and Next/Back/Stop work from the bubble and from VS Code.
 
 **P6. Voice in.** Push-to-talk, transcription, command matcher with tests, barge-in.
@@ -379,7 +379,7 @@ Each phase must build, run and be committed before the next starts. Track progre
 
 Defaults are chosen; change them here if the answer differs.
 
-1. Product name: **Devy** (default).
+1. Product name: **Barnaby** (default).
 2. Hackathon submission requirements (video length, public repo, form fields) are not yet checked: do it at the start of P7, or earlier if possible.
 3. `muse-voice-transcribe-1.0` endpoint and audio formats: verify in P6.
 4. Whether Gemini CLI hooks exist in the installed version: verify in P3.

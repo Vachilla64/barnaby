@@ -18,6 +18,7 @@ pub struct ServerState {
     pub port: u16,
     pub app_handle: Option<AppHandle>,
     pub speech_queue: Option<crate::voice::queue::SpeechQueue>,
+    pub registry: Arc<crate::agents::AgentRegistry>,
 }
 
 #[derive(Serialize)]
@@ -33,13 +34,89 @@ async fn health_handler() -> Json<HealthResponse> {
     })
 }
 
-#[derive(Serialize)]
-struct AgentsResponse {
-    agents: Vec<String>,
+async fn agents_handler(State(state): State<Arc<ServerState>>) -> Json<serde_json::Value> {
+    Json(serde_json::json!({ "agents": state.registry.list() }))
 }
 
-async fn agents_handler() -> Json<AgentsResponse> {
-    Json(AgentsResponse { agents: vec![] })
+/// Tell the overlay an agent's pet changed state.
+pub fn emit_agent_state(state: &ServerState, kind: &str, pet_state: &str, text: Option<&str>) {
+    if let Some(app) = &state.app_handle {
+        let _ = app.emit(
+            "agent:state",
+            serde_json::json!({ "agent_kind": kind, "state": pet_state, "text": text }),
+        );
+    }
+}
+
+/// Speak through the queue with the voice configured for this agent kind.
+pub async fn speak(
+    state: &ServerState,
+    kind: &str,
+    text: &str,
+    priority: crate::voice::queue::Priority,
+    speech_kind: crate::voice::queue::SpeechKind,
+) {
+    let Some(queue) = &state.speech_queue else { return };
+    let voice = crate::config::load_or_create_config()
+        .ok()
+        .and_then(|cfg| cfg.voice.voices.get(kind).cloned())
+        .unwrap_or_else(|| "Toby".into());
+    queue
+        .enqueue(crate::voice::queue::SpeechRequest {
+            agent_id: kind.to_string(),
+            text: text.to_string(),
+            priority,
+            kind: speech_kind,
+            voice: Some(voice),
+        })
+        .await;
+}
+
+#[derive(Deserialize)]
+struct KindQuery {
+    kind: Option<String>,
+}
+
+async fn mcp_handler(
+    State(state): State<Arc<ServerState>>,
+    axum::extract::Query(q): axum::extract::Query<KindQuery>,
+    Json(body): Json<serde_json::Value>,
+) -> Response {
+    let kind = q.kind.unwrap_or_else(|| "claude-code".into());
+    // JSON-RPC batches are legal; answer each message.
+    let messages = match body {
+        serde_json::Value::Array(a) => a,
+        other => vec![other],
+    };
+    let mut replies = Vec::new();
+    for m in &messages {
+        if let Some(r) = crate::mcp::handle(&state, &kind, m).await {
+            replies.push(r);
+        }
+    }
+    match replies.len() {
+        0 => StatusCode::ACCEPTED.into_response(),
+        1 => Json(replies.remove(0)).into_response(),
+        _ => Json(replies).into_response(),
+    }
+}
+
+async fn hook_handler(
+    State(state): State<Arc<ServerState>>,
+    axum::extract::Path(kind): axum::extract::Path<String>,
+    Json(payload): Json<serde_json::Value>,
+) -> impl IntoResponse {
+    let action = crate::agents::map_hook(&kind, &payload);
+    state.registry.touch(&kind, action.state, action.feed.as_deref());
+    if let Some(pet_state) = action.state {
+        emit_agent_state(&state, &kind, pet_state, action.feed.as_deref());
+    }
+    if let Some((text, priority)) = &action.speech {
+        if !(action.skip_if_done_recently && state.registry.done_recently(&kind)) {
+            speak(&state, &kind, text, *priority, crate::voice::queue::SpeechKind::Alert).await;
+        }
+    }
+    StatusCode::OK
 }
 
 #[derive(Deserialize, Serialize, Clone, Debug)]
@@ -120,6 +197,8 @@ pub fn build_router(state: Arc<ServerState>) -> Router {
     let protected_routes = Router::new()
         .route("/api/v1/agents", get(agents_handler))
         .route("/api/v1/say", post(say_handler))
+        .route("/api/v1/hooks/{kind}", post(hook_handler))
+        .route("/mcp", post(mcp_handler))
         .route_layer(middleware::from_fn_with_state(state.clone(), auth_middleware));
 
     Router::new()
@@ -134,6 +213,7 @@ pub async fn start_server(
     preferred_port: u16,
     app_handle: Option<AppHandle>,
     speech_queue: Option<crate::voice::queue::SpeechQueue>,
+    registry: Arc<crate::agents::AgentRegistry>,
 ) -> Result<(u16, tokio::task::JoinHandle<()>), Box<dyn std::error::Error + Send + Sync>> {
     let mut bound_listener = None;
     let mut bound_port = preferred_port;
@@ -169,6 +249,7 @@ pub async fn start_server(
         port: bound_port,
         app_handle,
         speech_queue,
+        registry,
     });
 
     let app = build_router(state);
@@ -183,6 +264,22 @@ pub async fn start_server(
 }
 
 #[cfg(test)]
+pub fn test_state_with_token(token: &str) -> ServerState {
+    ServerState {
+        token: token.to_string(),
+        port: 4747,
+        app_handle: None,
+        speech_queue: None,
+        registry: Arc::new(crate::agents::AgentRegistry::default()),
+    }
+}
+
+#[cfg(test)]
+pub fn test_state() -> ServerState {
+    test_state_with_token("test")
+}
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use axum::body::Body;
@@ -190,12 +287,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_health_endpoint() {
-        let state = Arc::new(ServerState {
-            token: "testtoken123".to_string(),
-            port: 4747,
-            app_handle: None,
-            speech_queue: None,
-        });
+        let state = Arc::new(test_state_with_token("testtoken123"));
         let app = build_router(state);
 
         let req = Request::builder()
@@ -215,12 +307,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_auth_unauthorized_without_token() {
-        let state = Arc::new(ServerState {
-            token: "secrettoken456".to_string(),
-            port: 4747,
-            app_handle: None,
-            speech_queue: None,
-        });
+        let state = Arc::new(test_state_with_token("secrettoken456"));
         let app = build_router(state);
 
         let req = Request::builder()
@@ -234,12 +321,7 @@ mod tests {
 
     #[tokio::test]
     async fn test_auth_authorized_with_bearer_token() {
-        let state = Arc::new(ServerState {
-            token: "secrettoken456".to_string(),
-            port: 4747,
-            app_handle: None,
-            speech_queue: None,
-        });
+        let state = Arc::new(test_state_with_token("secrettoken456"));
         let app = build_router(state);
 
         let req = Request::builder()

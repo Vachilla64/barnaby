@@ -1,12 +1,12 @@
 [package]
-name = "devy"
+name = "barnaby"
 version = "0.1.0"
-description = "Devy desktop pet"
-authors = ["Devy Team"]
+description = "Barnaby desktop pet"
+authors = ["Barnaby Team"]
 edition = "2021"
 
 [lib]
-name = "devy_lib"
+name = "barnaby_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]

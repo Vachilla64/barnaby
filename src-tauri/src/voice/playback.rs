@@ -26,7 +26,7 @@ impl AudioPlayer {
         let (cmd_tx, cmd_rx) = channel::<AudioCommand>();
 
         thread::Builder::new()
-            .name("devy-audio-worker".into())
+            .name("barnaby-audio-worker".into())
             .spawn(move || {
                 // Initialize default output stream on this audio thread
                 let stream_res = OutputStream::try_default();

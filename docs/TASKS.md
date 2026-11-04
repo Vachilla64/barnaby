@@ -4,9 +4,9 @@ Tick each task when it is done and verified (see AGENTS.md). Phases and their "D
 
 ## P0. Scaffold
 - [x] `git mv Cargo.toml Cargo.lock src prototype/`
-- [x] Create Tauri 2 app at repo root (Vite, vanilla TypeScript); app name `Devy`, identifier `dev.devy.app`
-- [x] Config file `%APPDATA%\Devy\config.json` with port and token (SPEC 6)
-- [x] Logging to `%APPDATA%\Devy\logs` (`tracing`)
+- [x] Create Tauri 2 app at repo root (Vite, vanilla TypeScript); app name `Barnaby`, identifier `dev.barnaby.app`
+- [x] Config file `%APPDATA%\Barnaby\config.json` with port and token (SPEC 6)
+- [x] Logging to `%APPDATA%\Barnaby\logs` (`tracing`)
 - [x] axum server on 127.0.0.1:4747 (fallback 4748-4757), `GET /health`, token middleware
 - [x] Tray icon: Settings, Quit
 - [x] Commit `P0: scaffold`
@@ -31,13 +31,13 @@ Tick each task when it is done and verified (see AGENTS.md). Phases and their "D
 - [x] Commit `P2: voice out`
 
 ## P3. Agent link
-- [ ] Agent registry (kinds, one pet per kind, sleep and removal timers)
-- [ ] MCP server at `/mcp`: initialize, tools/list, tools/call
-- [ ] Tools: devy_status, devy_say, devy_done, devy_ask_user, devy_tour (tour can stub until P5)
-- [ ] Hook endpoint `/api/v1/hooks/{kind}` with Claude Code event mapping; unit tests for the mapping
-- [ ] Settings: Connect Claude Code (MCP + hooks merge, shows diff, asks first)
-- [ ] Settings: Connect Gemini CLI (check whether hooks exist; note result)
-- [ ] Copy-instructions button (SPEC 5.4.4)
+- [x] Agent registry (kinds, one pet per kind, sleep and removal timers)
+- [x] MCP server at `/mcp`: initialize, tools/list, tools/call
+- [x] Tools: barnaby_status, barnaby_say, barnaby_done, barnaby_ask_user, barnaby_tour (tour can stub until P5)
+- [x] Hook endpoint `/api/v1/hooks/{kind}` with Claude Code event mapping; unit tests for the mapping
+- [x] Settings: Connect Claude Code (MCP + hooks merge, shows diff, asks first)
+- [x] Settings: Connect Gemini CLI (check whether hooks exist; note result)
+- [x] Copy-instructions button (SPEC 5.4.4)
 - [ ] Verify with a real Claude Code session
 - [ ] Commit `P3: agent link`
 
@@ -58,7 +58,7 @@ Tick each task when it is done and verified (see AGENTS.md). Phases and their "D
 - [ ] `tour.step` handler: open, smooth scroll, highlight decoration, reply `tour.step.shown`
 - [ ] Commands and keybindings: Ask about this, Next, Previous, Stop
 - [ ] Tour engine in Rust (steps, timing, controls); bubble Back/Next/Stop
-- [ ] Hook `devy_tour` up to the engine
+- [ ] Hook `barnaby_tour` up to the engine
 - [ ] Package `.vsix`
 - [ ] Commit `P5: tours`
 
@@ -83,6 +83,10 @@ Tick each task when it is done and verified (see AGENTS.md). Phases and their "D
 - 2026-11-04: Used `tauri::tray::TrayIconBuilder` and axum 0.8 `build_router` pattern with 6 unit tests covering health, auth token, and config serialization.
 - 2026-11-04: Fixed `STATUS_ENTRYPOINT_NOT_FOUND (0xc0000139)` in test harness caused by `TaskDialogIndirect` in `comctl32.dll` requiring Common Controls v6; added `/MANIFESTDEPENDENCY` link argument in `build.rs` and aligned `windows` crate version to `0.62` across workspace.
 - 2026-11-04: Implemented P1 frontend: SVG PetComponent with 7 states (idle, working, talking, thinking, alert, happy, sleeping), SpeechBubbleComponent with action buttons, PetMenuManager with 200ms `mouseLeave` debounce, PetDragManager with coordinates persistence, ActivityFeedManager, and continuous click-through region synchronization.
-- 2026-11-04: User preference recorded: during long stretches of autonomous work, agents must speak progress updates mid-stream rather than waiting until the end. Oscar/Devy's voice is set to a British male voice from Phonon defaults (`Toby`), and Oscar will speak updates during long runs.
+- 2026-11-04: User preference recorded: during long stretches of autonomous work, agents must speak progress updates mid-stream rather than waiting until the end. Barnaby's voice is set to a British male voice from Phonon defaults (`Toby`), and Barnaby will speak updates during long runs.
 - 2026-11-04: Fixed overlay pet interactivity bug: (1) Added Win32 `ScreenToClient` conversion so screen-space cursor coordinates match webview client physical coordinates across multi-monitor setups; (2) Applied direct `SetWindowLongW` + `SetWindowPos` (`SWP_FRAMECHANGED`) on HWND in clickthrough watcher thread to eliminate Tao event-loop message queue latency; (3) Added `.interactive, .interactive * { pointer-events: auto !important; }` in CSS so SVG elements and paths receive pointer events; (4) Removed `offsetParent` check in `regions.ts` which skipped SVG elements; (5) Locked window interactive immediately on `mousedown` in `PetDragManager` so dragging cannot be dropped if cursor moves fast; (6) Enforced explicit `PhysicalPosition` and `PhysicalSize` on overlay window to guarantee 1:1 pixel mapping.
 - 2026-11-04: Implemented P2 Voice Out: (1) Phonon sidecar manager with Windows Job Object (`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`) ensuring child terminates even on crash; (2) AudioPlayer wrapping Rodio in dedicated thread with volume/mute controls; (3) SpeechQueue with lookahead sentence prefetching (synthesizing N+1 while N plays), priority barge-in for High alerts, and 20s throttle tracker for low/normal status; (4) SentenceSplitter handling code extensions (`.ts`, `.rs`), version tags (`v1.0`), decimal numbers, and abbreviations; (5) Frontend Speech events (`speech:start`, `speech:end`, `speech:bubble`) animating pet mouth and bubble; (6) Settings view Phonon detection, uv/ptts installer triggers, and per-agent voice configuration.
+- 2026-11-04: Renamed Devy to Oscar, then Oscar to Barnaby (crate `barnaby`/`barnaby_lib`, identifier `dev.barnaby.app`, `%APPDATA%\Barnaby`, log `barnaby.log`). Old `%APPDATA%\Devy` is moved across on first start. Fixed: closing Settings destroyed the window so the tray could not reopen it (now hides); Phonon detection and install ran blocking child processes on async threads (now `spawn_blocking`). Note: `ptts` is not installed on the dev machine (only `pocket-tts`), so Phonon voice names are unverified until it is.
+- 2026-11-04: P3 backend done (`agents.rs`, `mcp.rs`, `connect.rs`, hook route). Verified live with curl: `/mcp` tools/list, hook Notification -> registry state `alert`, Phonon auto-started and healthy. Stubs: `barnaby_ask_user` speaks and returns "no answer" (bubble buttons come with P4/P6); `barnaby_tour` returns "started" (P5). Registry has no sleep/removal timers yet and the overlay shows one pet (claude-code); both are open. Gemini Connect button only shows manual steps (scope cut). Not yet verified: a real Claude Code session after Connect.
+- 2026-11-04: Fixed a P2 bug: Phonon streams a WAV with 0xFFFFFFFF sizes in the header and rodio could not decode it ("end of stream"). `fix_wav_header` now writes the real sizes. Needs a restart of the app to hear it.
+- 2026-11-04: The C: drive hit 0 bytes free during a build. `src-tauri/target` is ~2.8 GB; delete stale `target/debug` output after any rename.

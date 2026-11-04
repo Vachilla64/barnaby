@@ -1,5 +1,8 @@
+pub mod agents;
 pub mod config;
+pub mod connect;
 pub mod logging;
+pub mod mcp;
 pub mod overlay;
 pub mod server;
 pub mod voice;
@@ -21,6 +24,20 @@ use voice::{
     queue::SpeechQueue,
     VoiceState,
 };
+
+#[tauri::command]
+fn connect_preview_claude() -> Result<String, String> {
+    let cfg = config::load_or_create_config().map_err(|e| e.to_string())?;
+    Ok(connect::describe_claude_connect(cfg.port))
+}
+
+#[tauri::command]
+async fn connect_claude() -> Result<String, String> {
+    let cfg = config::load_or_create_config().map_err(|e| e.to_string())?;
+    tokio::task::spawn_blocking(move || connect::connect_claude_code(cfg.port, &cfg.token))
+        .await
+        .map_err(|e| e.to_string())?
+}
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -56,6 +73,8 @@ pub fn run() {
             overlay::save_pet_position,
             overlay::open_settings,
             overlay::exit_app,
+            connect_preview_claude,
+            connect_claude,
             voice::get_phonon_status,
             voice::start_phonon,
             voice::install_uv,
@@ -173,7 +192,7 @@ pub fn run() {
                 "overlay",
                 WebviewUrl::App("index.html".into()),
             )
-            .title("Devy Overlay")
+            .title("Barnaby Overlay")
             .position(bounds.x as f64, bounds.y as f64)
             .inner_size(bounds.width as f64, bounds.height as f64)
             .transparent(true)
@@ -196,7 +215,7 @@ pub fn run() {
                 "settings",
                 WebviewUrl::App("index.html".into()),
             )
-            .title("Devy Settings")
+            .title("Barnaby Settings")
             .inner_size(640.0, 560.0)
             .center()
             .visible(false)
@@ -207,9 +226,9 @@ pub fn run() {
             let app_handle = app.handle().clone();
             let queue_clone = queue.clone();
             tauri::async_runtime::spawn(async move {
-                match server::start_server(token_clone, preferred_port, Some(app_handle), Some(queue_clone)).await {
+                match server::start_server(token_clone, preferred_port, Some(app_handle), Some(queue_clone), Arc::new(agents::AgentRegistry::default())).await {
                     Ok((actual_port, _handle)) => {
-                        tracing::info!("Devy axum server running on port {}", actual_port);
+                        tracing::info!("Barnaby axum server running on port {}", actual_port);
                         if actual_port != preferred_port {
                             tracing::warn!(
                                 "Port fallback used: {} (configured was {})",
@@ -229,6 +248,15 @@ pub fn run() {
             });
 
             Ok(())
+        })
+        .on_window_event(|window, event| {
+            // Closing Settings hides it. Destroying it would leave the tray with nothing to reopen.
+            if window.label() == "settings" {
+                if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    let _ = window.hide();
+                }
+            }
         })
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,4 +1,4 @@
-# Devy
+# Barnaby
 
 A desktop pet for each of your AI coding agents. The agents tell their pet what they are doing, and the pet tells you out loud. Ask a pet about your codebase and it walks you through the code in VS Code, file by file, while it talks.
 

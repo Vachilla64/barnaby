@@ -105,8 +105,13 @@ impl PhononManager {
     /// Refresh detection of uv, ptts, and health
     pub async fn refresh_status(&self) -> PhononStatusInfo {
         let is_healthy = self.check_health().await;
-        let uv_ok = Self::detect_uv();
-        let ptts_ok = if uv_ok { Self::detect_ptts() } else { false };
+        // detect_* spawn child processes; keep them off the async worker threads.
+        let (uv_ok, ptts_ok) = tokio::task::spawn_blocking(|| {
+            let uv_ok = Self::detect_uv();
+            (uv_ok, uv_ok && Self::detect_ptts())
+        })
+        .await
+        .unwrap_or((false, false));
 
         let mut current = self.status.lock().unwrap();
         current.uv_installed = uv_ok;
@@ -180,7 +185,10 @@ impl PhononManager {
         cmd.args(["-ExecutionPolicy", "Bypass", "-c", script])
             .creation_flags(CREATE_NO_WINDOW);
 
-        let output = cmd.output().map_err(|e| format!("Failed to run powershell: {}", e))?;
+        let output = tokio::task::spawn_blocking(move || cmd.output())
+            .await
+            .map_err(|e| format!("Install task failed: {}", e))?
+            .map_err(|e| format!("Failed to run powershell: {}", e))?;
         if !output.status.success() {
             let err = String::from_utf8_lossy(&output.stderr).to_string();
             let mut st = self.status.lock().unwrap();
@@ -209,7 +217,10 @@ impl PhononManager {
         cmd.args(["tool", "install", "ptts"])
             .creation_flags(CREATE_NO_WINDOW);
 
-        let output = cmd.output().map_err(|e| format!("Failed to run uv tool install ptts: {}", e))?;
+        let output = tokio::task::spawn_blocking(move || cmd.output())
+            .await
+            .map_err(|e| format!("Install task failed: {}", e))?
+            .map_err(|e| format!("Failed to run uv tool install ptts: {}", e))?;
         if !output.status.success() {
             let err = String::from_utf8_lossy(&output.stderr).to_string();
             let mut st = self.status.lock().unwrap();
@@ -404,7 +415,7 @@ impl PhononManager {
             .await
             .map_err(|e| format!("Failed reading audio bytes from Phonon: {}", e))?;
 
-        Ok(bytes.to_vec())
+        Ok(fix_wav_header(bytes.to_vec()))
     }
 
     pub fn stop(&self) {
@@ -414,6 +425,55 @@ impl PhononManager {
         }
         let mut st = self.status.lock().unwrap();
         st.state = PhononState::Offline;
+    }
+}
+
+/// Phonon streams a WAV of unknown length, so its header holds the maximum size (0xFFFFFFFF).
+/// Decoders reject that. Once the whole body is in memory, write the real sizes.
+pub fn fix_wav_header(mut wav: Vec<u8>) -> Vec<u8> {
+    if wav.len() < 12 || &wav[0..4] != b"RIFF" || &wav[8..12] != b"WAVE" {
+        return wav;
+    }
+    let riff_size = (wav.len() - 8) as u32;
+    wav[4..8].copy_from_slice(&riff_size.to_le_bytes());
+    let mut pos = 12;
+    while pos + 8 <= wav.len() {
+        let id = [wav[pos], wav[pos + 1], wav[pos + 2], wav[pos + 3]];
+        let size = u32::from_le_bytes([wav[pos + 4], wav[pos + 5], wav[pos + 6], wav[pos + 7]]) as usize;
+        if &id == b"data" {
+            let real = (wav.len() - (pos + 8)) as u32;
+            wav[pos + 4..pos + 8].copy_from_slice(&real.to_le_bytes());
+            break;
+        }
+        pos += 8 + size;
+    }
+    wav
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fixes_unknown_length_wav_header() {
+        let mut wav = Vec::new();
+        wav.extend_from_slice(b"RIFF");
+        wav.extend_from_slice(&u32::MAX.to_le_bytes());
+        wav.extend_from_slice(b"WAVEfmt ");
+        wav.extend_from_slice(&16u32.to_le_bytes());
+        wav.extend_from_slice(&[1, 0, 1, 0, 0xC0, 0x5D, 0, 0, 0x80, 0xBB, 0, 0, 2, 0, 16, 0]);
+        wav.extend_from_slice(b"data");
+        wav.extend_from_slice(&u32::MAX.to_le_bytes());
+        wav.extend_from_slice(&[0u8; 100]);
+        let total = wav.len();
+        let fixed = fix_wav_header(wav);
+        assert_eq!(u32::from_le_bytes(fixed[4..8].try_into().unwrap()) as usize, total - 8);
+        assert_eq!(u32::from_le_bytes(fixed[40..44].try_into().unwrap()), 100);
+    }
+
+    #[test]
+    fn leaves_non_wav_alone() {
+        assert_eq!(fix_wav_header(vec![1, 2, 3]), vec![1, 2, 3]);
     }
 }
 

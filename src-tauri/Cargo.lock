@@ -297,6 +297,29 @@ dependencies = [
 ]
 
 [[package]]
+name = "barnaby"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "dirs 5.0.1",
+ "rand 0.8.8",
+ "reqwest 0.12.28",
+ "rodio",
+ "serde",
+ "serde_json",
+ "tauri",
+ "tauri-build",
+ "tauri-plugin-opener",
+ "tokio",
+ "tower",
+ "tower-http",
+ "tracing",
+ "tracing-appender",
+ "tracing-subscriber",
+ "windows 0.62.2",
+]
+
+[[package]]
 name = "base64"
 version = "0.21.7"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -917,29 +940,6 @@ dependencies = [
  "quote",
  "rustc_version",
  "syn 2.0.119",
-]
-
-[[package]]
-name = "devy"
-version = "0.1.0"
-dependencies = [
- "axum",
- "dirs 5.0.1",
- "rand 0.8.8",
- "reqwest 0.12.28",
- "rodio",
- "serde",
- "serde_json",
- "tauri",
- "tauri-build",
- "tauri-plugin-opener",
- "tokio",
- "tower",
- "tower-http",
- "tracing",
- "tracing-appender",
- "tracing-subscriber",
- "windows 0.62.2",
 ]
 
 [[package]]

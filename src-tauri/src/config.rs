@@ -88,7 +88,7 @@ pub fn generate_random_token() -> String {
 pub fn get_appdata_dir() -> PathBuf {
     dirs::data_dir()
         .unwrap_or_else(|| PathBuf::from("."))
-        .join("Devy")
+        .join("Barnaby")
 }
 
 pub fn get_config_path() -> PathBuf {
@@ -97,6 +97,16 @@ pub fn get_config_path() -> PathBuf {
 
 pub fn load_or_create_config() -> Result<AppConfig, Box<dyn std::error::Error + Send + Sync>> {
     let dir = get_appdata_dir();
+    if !dir.exists() {
+        // The app was called Devy, then Oscar, before Barnaby; carry the old config across.
+        for old in ["Oscar", "Devy"] {
+            let old_dir = dir.with_file_name(old);
+            if old_dir.exists() {
+                let _ = fs::rename(&old_dir, &dir);
+                break;
+            }
+        }
+    }
     if !dir.exists() {
         fs::create_dir_all(&dir)?;
     }
