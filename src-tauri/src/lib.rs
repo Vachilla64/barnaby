@@ -128,6 +128,10 @@ pub fn run() {
             .shadow(false)
             .build()?;
 
+            // Ensure physical pixel matching across multi-monitor & high-DPI scaling
+            let _ = overlay_window.set_position(tauri::Position::Physical(tauri::PhysicalPosition::new(bounds.x, bounds.y)));
+            let _ = overlay_window.set_size(tauri::Size::Physical(tauri::PhysicalSize::new(bounds.width as u32, bounds.height as u32)));
+
             // Start cursor watcher for click-through
             clickthrough.start_watcher(overlay_window);
 

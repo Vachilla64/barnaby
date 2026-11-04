@@ -27,8 +27,9 @@ html, body {
   pointer-events: none;
 }
 
-/* Elements that receive pointer events */
-.interactive {
+/* Elements that receive pointer events - ensure all children/descendants receive events */
+.interactive,
+.interactive * {
   pointer-events: auto !important;
 }
 
@@ -45,7 +46,13 @@ html, body {
   z-index: 1000;
 }
 
-body.dragging, body.dragging .pet-container {
+.pet-container,
+.pet-container * {
+  cursor: grab;
+}
+
+body.dragging,
+body.dragging * {
   cursor: grabbing !important;
 }
 

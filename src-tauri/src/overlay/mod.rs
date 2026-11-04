@@ -12,6 +12,7 @@ pub struct OverlayState {
 
 #[tauri::command]
 pub fn set_click_regions(regions: Vec<ClickRegion>, state: State<'_, OverlayState>) {
+    tracing::debug!("Setting {} click regions: {:?}", regions.len(), regions);
     state.clickthrough.set_regions(regions);
 }
 

@@ -154,6 +154,10 @@ export class PetMenuManager {
   }
 
   public showLeftMenu(x: number, y: number): void {
+    if (!this.leftMenuEl.classList.contains("hidden")) {
+      this.hideAll();
+      return;
+    }
     this.rightMenuEl.classList.add("hidden");
     this.leftMenuEl.style.left = `${x}px`;
     this.leftMenuEl.style.top = `${y}px`;
@@ -162,6 +166,10 @@ export class PetMenuManager {
   }
 
   public showRightMenu(x: number, y: number): void {
+    if (!this.rightMenuEl.classList.contains("hidden")) {
+      this.hideAll();
+      return;
+    }
     this.leftMenuEl.classList.add("hidden");
     this.rightMenuEl.style.left = `${x}px`;
     this.rightMenuEl.style.top = `${y}px`;

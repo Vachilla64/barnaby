@@ -5,8 +5,13 @@ use std::sync::{
 };
 use std::time::Duration;
 use tauri::WebviewWindow;
-use windows::Win32::Foundation::POINT;
-use windows::Win32::UI::WindowsAndMessaging::GetCursorPos;
+use windows::Win32::Foundation::{HWND, POINT};
+use windows::Win32::Graphics::Gdi::ScreenToClient;
+use windows::Win32::UI::WindowsAndMessaging::{
+    GetCursorPos, GetWindowLongW, SetWindowLongW, SetWindowPos, GWL_EXSTYLE,
+    SWP_FRAMECHANGED, SWP_NOACTIVATE, SWP_NOMOVE, SWP_NOSIZE, SWP_NOZORDER,
+    WS_EX_TRANSPARENT,
+};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ClickRegion {
@@ -55,6 +60,24 @@ impl ClickthroughManager {
         self.is_dragging.store(dragging, Ordering::SeqCst);
         if dragging {
             if let Some(w) = window {
+                if let Ok(h) = w.hwnd() {
+                    unsafe {
+                        let cur_ex = GetWindowLongW(h, GWL_EXSTYLE) as u32;
+                        let target_ex = cur_ex & !WS_EX_TRANSPARENT.0;
+                        if cur_ex != target_ex {
+                            SetWindowLongW(h, GWL_EXSTYLE, target_ex as i32);
+                            let _ = SetWindowPos(
+                                h,
+                                None,
+                                0,
+                                0,
+                                0,
+                                0,
+                                SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+                            );
+                        }
+                    }
+                }
                 let _ = w.set_ignore_cursor_events(false);
                 self.is_interactive.store(true, Ordering::SeqCst);
             }
@@ -67,15 +90,35 @@ impl ClickthroughManager {
         let regions_ref = self.regions.clone();
         let dragging_ref = self.is_dragging.clone();
         let interactive_ref = self.is_interactive.clone();
+        let raw_hwnd_val: Option<isize> = window.hwnd().ok().map(|h| h.0 as isize);
 
         // Start by ignoring cursor events (click-through by default)
+        if let Some(val) = raw_hwnd_val {
+            unsafe {
+                let h = HWND(val as *mut _);
+                let cur_ex = GetWindowLongW(h, GWL_EXSTYLE) as u32;
+                let target_ex = cur_ex | WS_EX_TRANSPARENT.0;
+                SetWindowLongW(h, GWL_EXSTYLE, target_ex as i32);
+                let _ = SetWindowPos(
+                    h,
+                    None,
+                    0,
+                    0,
+                    0,
+                    0,
+                    SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+                );
+            }
+        }
         let _ = window.set_ignore_cursor_events(true);
         interactive_ref.store(false, Ordering::SeqCst);
 
         std::thread::spawn(move || {
+            let raw_hwnd = raw_hwnd_val.map(|v| HWND(v as *mut _));
             tracing::info!(
-                "Cursor click-through watcher thread started (gen {})",
-                current_gen
+                "Cursor click-through watcher thread started (gen {}, hwnd: {:?})",
+                current_gen,
+                raw_hwnd
             );
 
             while gen_tracker.load(Ordering::SeqCst) == current_gen {
@@ -87,17 +130,61 @@ impl ClickthroughManager {
                     let mut inside = dragging;
 
                     if !inside {
+                        // Convert screen coordinates to window client coordinates
+                        let mut client_pt = pt;
+                        if let Some(h) = raw_hwnd {
+                            unsafe {
+                                let _ = ScreenToClient(h, &mut client_pt);
+                            }
+                        }
+
                         if let Ok(guard) = regions_ref.lock() {
-                            inside = guard.iter().any(|r| r.contains(pt.x, pt.y));
+                            inside = guard.iter().any(|r| r.contains(client_pt.x, client_pt.y));
                         }
                     }
 
                     let was_interactive = interactive_ref.load(Ordering::SeqCst);
 
                     if inside && !was_interactive {
+                        if let Some(h) = raw_hwnd {
+                            unsafe {
+                                let cur_ex = GetWindowLongW(h, GWL_EXSTYLE) as u32;
+                                let target_ex = cur_ex & !WS_EX_TRANSPARENT.0;
+                                if cur_ex != target_ex {
+                                    SetWindowLongW(h, GWL_EXSTYLE, target_ex as i32);
+                                    let _ = SetWindowPos(
+                                        h,
+                                        None,
+                                        0,
+                                        0,
+                                        0,
+                                        0,
+                                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+                                    );
+                                }
+                            }
+                        }
                         let _ = window.set_ignore_cursor_events(false);
                         interactive_ref.store(true, Ordering::SeqCst);
                     } else if !inside && was_interactive {
+                        if let Some(h) = raw_hwnd {
+                            unsafe {
+                                let cur_ex = GetWindowLongW(h, GWL_EXSTYLE) as u32;
+                                let target_ex = cur_ex | WS_EX_TRANSPARENT.0;
+                                if cur_ex != target_ex {
+                                    SetWindowLongW(h, GWL_EXSTYLE, target_ex as i32);
+                                    let _ = SetWindowPos(
+                                        h,
+                                        None,
+                                        0,
+                                        0,
+                                        0,
+                                        0,
+                                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+                                    );
+                                }
+                            }
+                        }
                         let _ = window.set_ignore_cursor_events(true);
                         interactive_ref.store(false, Ordering::SeqCst);
                     }
@@ -107,6 +194,22 @@ impl ClickthroughManager {
             }
 
             // PLAYBOOK lesson: always clear click-through when leaving
+            if let Some(h) = raw_hwnd {
+                unsafe {
+                    let cur_ex = GetWindowLongW(h, GWL_EXSTYLE) as u32;
+                    let target_ex = cur_ex & !WS_EX_TRANSPARENT.0;
+                    SetWindowLongW(h, GWL_EXSTYLE, target_ex as i32);
+                    let _ = SetWindowPos(
+                        h,
+                        None,
+                        0,
+                        0,
+                        0,
+                        0,
+                        SWP_NOMOVE | SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED,
+                    );
+                }
+            }
             let _ = window.set_ignore_cursor_events(false);
             tracing::info!(
                 "Cursor watcher exiting (gen {}) - reset click-through",

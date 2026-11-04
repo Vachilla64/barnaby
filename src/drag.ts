@@ -40,13 +40,15 @@ export class PetDragManager {
       this.startPetX = rect.left;
       this.startPetY = rect.top;
 
+      // Ensure window stays interactive while mouse is held down on the pet
+      invoke("set_drag_state", { isDragging: true }).catch(console.error);
+
       const onMouseMove = (moveEvent: MouseEvent) => {
         const dx = moveEvent.clientX - this.startMouseX;
         const dy = moveEvent.clientY - this.startMouseY;
 
         if (!this.isDragging && Math.hypot(dx, dy) > 4) {
           this.isDragging = true;
-          invoke("set_drag_state", { isDragging: true }).catch(console.error);
           document.body.classList.add("dragging");
         }
 
@@ -66,9 +68,11 @@ export class PetDragManager {
         window.removeEventListener("mouseup", onMouseUp);
         document.body.classList.remove("dragging");
 
+        // Always release drag lock on mouseup
+        invoke("set_drag_state", { isDragging: false }).catch(console.error);
+
         if (this.isDragging) {
           this.isDragging = false;
-          invoke("set_drag_state", { isDragging: false }).catch(console.error);
 
           const pos = this.pet.getPosition();
           invoke("save_pet_position", {
