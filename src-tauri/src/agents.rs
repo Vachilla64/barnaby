@@ -10,6 +10,10 @@ use std::time::{Duration, Instant};
 const FEED_LIMIT: usize = 20;
 /// A `Stop` hook stays quiet if the agent already called `barnaby_done` this recently.
 pub const DONE_GRACE: Duration = Duration::from_secs(30);
+/// No message for this long: the pet goes to sleep.
+pub const SLEEP_AFTER: Duration = Duration::from_secs(10 * 60);
+/// No message for this long: the pet is removed.
+pub const REMOVE_AFTER: Duration = Duration::from_secs(60 * 60);
 
 #[derive(Debug, Clone, Serialize)]
 pub struct AgentInfo {
@@ -67,6 +71,28 @@ impl AgentRegistry {
             .and_then(|a| a.last_done)
             .map(|t| t.elapsed() < DONE_GRACE)
             .unwrap_or(false)
+    }
+
+    /// Put quiet agents to sleep and drop long-gone ones. Returns the kinds that just fell asleep
+    /// and the kinds that were removed.
+    pub fn sweep(&self, now: Instant) -> (Vec<String>, Vec<String>) {
+        let mut agents = self.agents.lock().unwrap();
+        let mut slept = Vec::new();
+        let mut removed = Vec::new();
+        for (kind, a) in agents.iter_mut() {
+            let quiet = now.saturating_duration_since(a.last_seen);
+            if quiet >= REMOVE_AFTER {
+                removed.push(kind.clone());
+            } else if quiet >= SLEEP_AFTER && a.state != "sleeping" {
+                a.state = "sleeping".into();
+                slept.push(kind.clone());
+            }
+        }
+        for kind in &removed {
+            agents.remove(kind);
+            self.feeds.lock().unwrap().remove(kind);
+        }
+        (slept, removed)
     }
 
     pub fn list(&self) -> Vec<AgentInfo> {
@@ -233,6 +259,22 @@ mod tests {
         assert!(!r.done_recently("claude-code"));
         r.mark_done("claude-code");
         assert!(r.done_recently("claude-code"));
+    }
+
+    #[test]
+    fn sweep_sleeps_then_removes_quiet_agents() {
+        let r = AgentRegistry::default();
+        r.touch("claude-code", Some("working"), None);
+        let t0 = Instant::now();
+        assert_eq!(r.sweep(t0), (vec![], vec![]));
+        let (slept, removed) = r.sweep(t0 + SLEEP_AFTER + Duration::from_secs(1));
+        assert_eq!((slept, removed), (vec!["claude-code".to_string()], vec![]));
+        assert_eq!(r.list()[0].state, "sleeping");
+        // Already asleep: not reported again.
+        assert_eq!(r.sweep(t0 + SLEEP_AFTER + Duration::from_secs(2)).0, Vec::<String>::new());
+        let (_, removed) = r.sweep(t0 + REMOVE_AFTER + Duration::from_secs(1));
+        assert_eq!(removed, vec!["claude-code".to_string()]);
+        assert!(r.list().is_empty());
     }
 
     #[test]

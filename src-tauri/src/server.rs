@@ -270,7 +270,22 @@ pub async fn start_server(
         )
     })?;
 
-    let app = build_router(state);
+    let app = build_router(state.clone());
+
+    // Pets fall asleep after 10 quiet minutes and are removed after 60 (SPEC 5.4.1).
+    let sweep_state = state.clone();
+    tokio::spawn(async move {
+        loop {
+            tokio::time::sleep(std::time::Duration::from_secs(30)).await;
+            let (slept, removed) = sweep_state.registry.sweep(std::time::Instant::now());
+            for kind in slept {
+                emit_agent_state(&sweep_state, &kind, "sleeping", None);
+            }
+            for kind in removed {
+                tracing::info!("Agent '{kind}' removed after an hour of silence");
+            }
+        }
+    });
 
     let handle = tokio::spawn(async move {
         if let Err(e) = axum::serve(listener, app).await {
@@ -309,7 +324,7 @@ mod tests {
     #[tokio::test]
     async fn test_health_endpoint() {
         let state = Arc::new(test_state_with_token("testtoken123"));
-        let app = build_router(state);
+        let app = build_router(state.clone());
 
         let req = Request::builder()
             .uri("/health")
@@ -329,7 +344,7 @@ mod tests {
     #[tokio::test]
     async fn test_auth_unauthorized_without_token() {
         let state = Arc::new(test_state_with_token("secrettoken456"));
-        let app = build_router(state);
+        let app = build_router(state.clone());
 
         let req = Request::builder()
             .uri("/api/v1/agents")
@@ -343,7 +358,7 @@ mod tests {
     #[tokio::test]
     async fn test_auth_authorized_with_bearer_token() {
         let state = Arc::new(test_state_with_token("secrettoken456"));
-        let app = build_router(state);
+        let app = build_router(state.clone());
 
         let req = Request::builder()
             .uri("/api/v1/agents")

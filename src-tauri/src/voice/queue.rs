@@ -327,7 +327,8 @@ impl SpeechQueue {
         st.cancel_token.store(true, Ordering::SeqCst);
         self.player.stop();
         st.items.clear();
-        st.is_playing = false;
+        // Leave `is_playing` alone. The pipeline task is still running and clears it itself when it
+        // sees the empty queue. Clearing it here let the next `enqueue` start a second pipeline.
         st.current_priority = None;
 
         if let Some(agent) = st.current_agent.take() {
