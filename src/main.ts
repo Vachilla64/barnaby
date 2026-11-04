@@ -117,7 +117,8 @@ async function main() {
         {
           id: "stop",
           label: "Stop",
-          onClick: () => {
+          onClick: async () => {
+            await invoke("stop_speech");
             bubble.hide();
             pet.setState("idle");
           },
@@ -134,13 +135,56 @@ async function main() {
         setTimeout(() => pet.setState("idle"), 3000);
       }
     },
-    onMute: () => {
-      bubble.show("Voice notifications muted.", [], 2500);
-      feedManager.addItem("Voice muted");
+    onMute: async () => {
+      try {
+        await invoke("set_voice_enabled", { enabled: false });
+        bubble.show("Voice notifications muted.", [], 2500);
+        feedManager.addItem("Voice muted");
+      } catch (e) {
+        console.error("Failed to mute voice:", e);
+      }
     },
   });
 
-  // 4. Listen for backend events (POST /api/v1/say)
+  // 4. Listen for backend speech events (P2 Voice Out)
+  await listen<{ agent_id: string; sentence: string }>("speech:start", (event) => {
+    const { sentence } = event.payload;
+    if (!sentence) return;
+
+    pet.setState("talking");
+    bubble.show(sentence, [
+      {
+        id: "stop",
+        label: "Stop",
+        onClick: async () => {
+          await invoke("stop_speech");
+          bubble.hide();
+          pet.setState("idle");
+        },
+      },
+    ], 15000);
+    feedManager.addItem(sentence);
+  });
+
+  await listen<{ agent_id: string }>("speech:end", () => {
+    if (pet.state === "talking") {
+      pet.setState("idle");
+    }
+    setTimeout(() => {
+      if (pet.state !== "talking") {
+        bubble.hide();
+      }
+    }, 1500);
+  });
+
+  await listen<{ agent_id: string; text: string }>("speech:bubble", (event) => {
+    const text = event.payload.text;
+    if (!text) return;
+    bubble.show(text, [], 4000);
+    feedManager.addItem(text);
+  });
+
+  // Fallback for direct pet:say events
   await listen<{ agent_kind?: string; text: string }>("pet:say", (event) => {
     const text = event.payload.text;
     if (!text) return;

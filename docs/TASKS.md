@@ -22,13 +22,13 @@ Tick each task when it is done and verified (see AGENTS.md). Phases and their "D
 - [x] Commit `P1: overlay and pets`
 
 ## P2. Voice out
-- [ ] Phonon setup flow in settings (detect, ask to install uv/ptts, start, health poll)
-- [ ] Sidecar in a Job Object, hidden window, killed on quit
-- [ ] Phonon client (`POST /tts`, streamed WAV)
-- [ ] Speech queue: sentence split, prefetch next sentence, priorities, 20 s throttle, `stop_speech`
-- [ ] Playback with rodio; `speech:start` / `speech:end` events; mouth animation
-- [ ] Unit tests: sentence splitter, throttle
-- [ ] Commit `P2: voice out`
+- [x] Phonon setup flow in settings (detect, ask to install uv/ptts, start, health poll)
+- [x] Sidecar in a Job Object, hidden window, killed on quit
+- [x] Phonon client (`POST /tts`, streamed WAV)
+- [x] Speech queue: sentence split, prefetch next sentence, priorities, 20 s throttle, `stop_speech`
+- [x] Playback with rodio; `speech:start` / `speech:end` events; mouth animation
+- [x] Unit tests: sentence splitter, throttle
+- [x] Commit `P2: voice out`
 
 ## P3. Agent link
 - [ ] Agent registry (kinds, one pet per kind, sleep and removal timers)
@@ -85,3 +85,4 @@ Tick each task when it is done and verified (see AGENTS.md). Phases and their "D
 - 2026-11-04: Implemented P1 frontend: SVG PetComponent with 7 states (idle, working, talking, thinking, alert, happy, sleeping), SpeechBubbleComponent with action buttons, PetMenuManager with 200ms `mouseLeave` debounce, PetDragManager with coordinates persistence, ActivityFeedManager, and continuous click-through region synchronization.
 - 2026-11-04: User preference recorded: during long stretches of autonomous work, agents must speak progress updates mid-stream rather than waiting until the end. Oscar/Devy's voice is set to a British male voice from Phonon defaults (`Toby`), and Oscar will speak updates during long runs.
 - 2026-11-04: Fixed overlay pet interactivity bug: (1) Added Win32 `ScreenToClient` conversion so screen-space cursor coordinates match webview client physical coordinates across multi-monitor setups; (2) Applied direct `SetWindowLongW` + `SetWindowPos` (`SWP_FRAMECHANGED`) on HWND in clickthrough watcher thread to eliminate Tao event-loop message queue latency; (3) Added `.interactive, .interactive * { pointer-events: auto !important; }` in CSS so SVG elements and paths receive pointer events; (4) Removed `offsetParent` check in `regions.ts` which skipped SVG elements; (5) Locked window interactive immediately on `mousedown` in `PetDragManager` so dragging cannot be dropped if cursor moves fast; (6) Enforced explicit `PhysicalPosition` and `PhysicalSize` on overlay window to guarantee 1:1 pixel mapping.
+- 2026-11-04: Implemented P2 Voice Out: (1) Phonon sidecar manager with Windows Job Object (`JOB_OBJECT_LIMIT_KILL_ON_JOB_CLOSE`) ensuring child terminates even on crash; (2) AudioPlayer wrapping Rodio in dedicated thread with volume/mute controls; (3) SpeechQueue with lookahead sentence prefetching (synthesizing N+1 while N plays), priority barge-in for High alerts, and 20s throttle tracker for low/normal status; (4) SentenceSplitter handling code extensions (`.ts`, `.rs`), version tags (`v1.0`), decimal numbers, and abbreviations; (5) Frontend Speech events (`speech:start`, `speech:end`, `speech:bubble`) animating pet mouth and bubble; (6) Settings view Phonon detection, uv/ptts installer triggers, and per-agent voice configuration.

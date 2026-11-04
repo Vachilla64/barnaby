@@ -44,3 +44,10 @@ export interface BubbleButton {
   label: string;
   onClick: () => void;
 }
+
+export interface PhononStatusInfo {
+  state: "ready" | "starting" | "installing" | "offline" | "failed";
+  uv_installed: boolean;
+  ptts_installed: boolean;
+  message?: string;
+}

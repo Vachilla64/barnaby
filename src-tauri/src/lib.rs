@@ -2,6 +2,7 @@ pub mod config;
 pub mod logging;
 pub mod overlay;
 pub mod server;
+pub mod voice;
 
 use overlay::{
     clickthrough::ClickthroughManager,
@@ -13,6 +14,12 @@ use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem},
     tray::{TrayIconBuilder, TrayIconEvent},
     Manager, WebviewUrl, WebviewWindowBuilder,
+};
+use voice::{
+    phonon::PhononManager,
+    playback::AudioPlayer,
+    queue::SpeechQueue,
+    VoiceState,
 };
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -48,9 +55,57 @@ pub fn run() {
             overlay::get_config,
             overlay::save_pet_position,
             overlay::open_settings,
-            overlay::exit_app
+            overlay::exit_app,
+            voice::get_phonon_status,
+            voice::start_phonon,
+            voice::install_uv,
+            voice::install_ptts,
+            voice::stop_speech,
+            voice::set_voice_volume,
+            voice::set_voice_enabled,
+            voice::set_agent_voice
         ])
         .setup(move |app| {
+            // Initialize voice subsystem
+            let phonon = Arc::new(PhononManager::new());
+            let player = match AudioPlayer::new() {
+                Ok(p) => p,
+                Err(e) => {
+                    tracing::error!("AudioPlayer initialization failed: {}", e);
+                    return Err(Box::new(std::io::Error::new(
+                        std::io::ErrorKind::Other,
+                        e,
+                    )));
+                }
+            };
+
+            if !app_config.voice.enabled {
+                player.set_volume(0.0);
+            } else {
+                player.set_volume(app_config.voice.volume);
+            }
+
+            let queue = SpeechQueue::new(phonon.clone(), player.clone(), Some(app.handle().clone()));
+
+            app.manage(VoiceState {
+                phonon: phonon.clone(),
+                player: player.clone(),
+                queue: queue.clone(),
+            });
+
+            // Automatically check and start Phonon if configured and uv/ptts available
+            let phonon_auto = phonon.clone();
+            tauri::async_runtime::spawn(async move {
+                let status = phonon_auto.refresh_status().await;
+                if status.state == voice::phonon::PhononState::Ready {
+                    tracing::info!("Phonon server is already running and ready");
+                } else if status.uv_installed && status.ptts_installed {
+                    tracing::info!("Starting Phonon server automatically");
+                    if let Err(e) = phonon_auto.start_server(None).await {
+                        tracing::warn!("Auto-start of Phonon server failed: {}", e);
+                    }
+                }
+            });
             // Build tray icon menu
             let settings_i = MenuItem::with_id(app, "settings", "Settings", true, None::<&str>)?;
             let quit_i = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
@@ -150,8 +205,9 @@ pub fn run() {
             // Start axum server in tokio runtime
             let token_clone = server_token.clone();
             let app_handle = app.handle().clone();
+            let queue_clone = queue.clone();
             tauri::async_runtime::spawn(async move {
-                match server::start_server(token_clone, preferred_port, Some(app_handle)).await {
+                match server::start_server(token_clone, preferred_port, Some(app_handle), Some(queue_clone)).await {
                     Ok((actual_port, _handle)) => {
                         tracing::info!("Devy axum server running on port {}", actual_port);
                         if actual_port != preferred_port {

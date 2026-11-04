@@ -17,6 +17,7 @@ pub struct ServerState {
     pub token: String,
     pub port: u16,
     pub app_handle: Option<AppHandle>,
+    pub speech_queue: Option<crate::voice::queue::SpeechQueue>,
 }
 
 #[derive(Serialize)]
@@ -57,7 +58,32 @@ async fn say_handler(
         payload.text
     );
 
-    if let Some(app) = &state.app_handle {
+    if let Some(queue) = &state.speech_queue {
+        let agent_id = payload
+            .agent_kind
+            .clone()
+            .unwrap_or_else(|| "claude-code".into());
+
+        let voice = if let Ok(cfg) = crate::config::load_or_create_config() {
+            cfg.voice
+                .voices
+                .get(&agent_id)
+                .cloned()
+                .unwrap_or_else(|| "Toby".into())
+        } else {
+            "Toby".into()
+        };
+
+        queue
+            .enqueue(crate::voice::queue::SpeechRequest {
+                agent_id,
+                text: payload.text.clone(),
+                priority: crate::voice::queue::Priority::Normal,
+                kind: crate::voice::queue::SpeechKind::Status,
+                voice: Some(voice),
+            })
+            .await;
+    } else if let Some(app) = &state.app_handle {
         if let Err(e) = app.emit("pet:say", &payload) {
             tracing::error!("Failed to emit pet:say event: {}", e);
         }
@@ -107,6 +133,7 @@ pub async fn start_server(
     token: String,
     preferred_port: u16,
     app_handle: Option<AppHandle>,
+    speech_queue: Option<crate::voice::queue::SpeechQueue>,
 ) -> Result<(u16, tokio::task::JoinHandle<()>), Box<dyn std::error::Error + Send + Sync>> {
     let mut bound_listener = None;
     let mut bound_port = preferred_port;
@@ -141,6 +168,7 @@ pub async fn start_server(
         token,
         port: bound_port,
         app_handle,
+        speech_queue,
     });
 
     let app = build_router(state);
@@ -166,6 +194,7 @@ mod tests {
             token: "testtoken123".to_string(),
             port: 4747,
             app_handle: None,
+            speech_queue: None,
         });
         let app = build_router(state);
 
@@ -190,6 +219,7 @@ mod tests {
             token: "secrettoken456".to_string(),
             port: 4747,
             app_handle: None,
+            speech_queue: None,
         });
         let app = build_router(state);
 
@@ -208,6 +238,7 @@ mod tests {
             token: "secrettoken456".to_string(),
             port: 4747,
             app_handle: None,
+            speech_queue: None,
         });
         let app = build_router(state);
 
