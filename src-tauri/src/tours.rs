@@ -66,10 +66,20 @@ pub fn resolve_path(path: &str, roots: &[String]) -> Option<PathBuf> {
     if p.is_absolute() {
         return p.exists().then(|| p.to_path_buf());
     }
-    roots
-        .iter()
-        .map(|r| Path::new(r).join(path))
-        .find(|candidate| candidate.exists())
+    // Models sometimes prefix the project folder's own name ("demo-project/src/a.ts").
+    // Try the path as given, then with that prefix removed.
+    let normalized = path.replace('\\', "/");
+    roots.iter().find_map(|r| {
+        let root = Path::new(r);
+        let direct = root.join(&normalized);
+        if direct.exists() {
+            return Some(direct);
+        }
+        let name = root.file_name()?.to_string_lossy().to_string();
+        let stripped = normalized.strip_prefix(&format!("{name}/"))?;
+        let candidate = root.join(stripped);
+        candidate.exists().then_some(candidate)
+    })
 }
 
 fn line_count(path: &Path) -> u32 {
@@ -288,6 +298,19 @@ mod tests {
         assert_eq!(jump(0, 3, Control::Back), Move::Goto(0));
         assert_eq!(jump(2, 3, Control::Back), Move::Goto(1));
         assert_eq!(jump(1, 3, Control::Stop), Move::End);
+    }
+
+    #[test]
+    fn resolves_paths_prefixed_with_the_project_folder_name() {
+        let dir = std::env::temp_dir().join("barnaby_prefix_test").join("demo-project");
+        std::fs::create_dir_all(dir.join("src")).unwrap();
+        std::fs::write(dir.join("src/a.ts"), "x
+").unwrap();
+        let roots = vec![dir.to_string_lossy().to_string()];
+        assert!(resolve_path("src/a.ts", &roots).is_some());
+        assert!(resolve_path("demo-project/src/a.ts", &roots).is_some());
+        assert!(resolve_path("demo-project\\src\\a.ts", &roots).is_some());
+        assert!(resolve_path("other/src/a.ts", &roots).is_none());
     }
 
     #[test]

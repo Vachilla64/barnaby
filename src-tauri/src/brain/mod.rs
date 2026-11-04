@@ -189,6 +189,10 @@ pub fn parse_answer(text: &str) -> Result<Answer, String> {
 
 async fn chat(cfg: &BrainConfig, key: &str, messages: &[Value], with_tools: bool) -> Result<Value, String> {
     let mut body = json!({"model": cfg.model, "messages": messages});
+    if cfg.base_url.contains("meta.ai") {
+        // Muse Spark always reasons; "low" keeps spoken answers quick.
+        body["reasoning_effort"] = json!("low");
+    }
     if with_tools {
         body["tools"] = tool_defs();
         body["tool_choice"] = json!("auto");
