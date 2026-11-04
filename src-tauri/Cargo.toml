@@ -26,18 +26,20 @@ tracing-subscriber = { version = "0.3", features = ["env-filter"] }
 tracing-appender = "0.2"
 dirs = "5"
 rand = "0.8"
-windows = { version = "0.58", features = [
+windows = { version = "0.62", features = [
     "Win32_Foundation",
     "Win32_UI_WindowsAndMessaging",
-    "Win32_Graphics_Dwm",
-    "Win32_UI_Shell",
 ] }
 
 [profile.dev]
-debug = 1
+incremental = false
+debug = 0
+strip = "debuginfo"
 
 [profile.test]
-debug = 1
+incremental = false
+debug = 0
+strip = "debuginfo"
 
 [profile.release]
 codegen-units = 1

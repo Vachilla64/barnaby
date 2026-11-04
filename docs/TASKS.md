@@ -12,14 +12,14 @@ Tick each task when it is done and verified (see AGENTS.md). Phases and their "D
 - [x] Commit `P0: scaffold`
 
 ## P1. Overlay and pets
-- [ ] Overlay window over all monitors: transparent, no decorations, always on top, skip taskbar
-- [ ] `set_click_regions` command + 8 ms cursor watcher with generation counter; reset click-through on exit
-- [ ] SVG pet with states: idle, working, talking, thinking, alert, happy, sleeping
-- [ ] Drag (window forced interactive while dragging), position saved per agent kind
-- [ ] Speech bubble with optional buttons
-- [ ] Pet menu (Ask…, Mute, Repeat last, Hide 1 h) and right-click menu (Settings, Quit)
-- [ ] `POST /api/v1/say` shows text in the bubble
-- [ ] Commit `P1: overlay and pets`
+- [x] Overlay window over all monitors: transparent, no decorations, always on top, skip taskbar
+- [x] `set_click_regions` command + 8 ms cursor watcher with generation counter; reset click-through on exit
+- [x] SVG pet with states: idle, working, talking, thinking, alert, happy, sleeping
+- [x] Drag (window forced interactive while dragging), position saved per agent kind
+- [x] Speech bubble with optional buttons
+- [x] Pet menu (Ask…, Mute, Repeat last, Hide 1 h) and right-click menu (Settings, Quit)
+- [x] `POST /api/v1/say` shows text in the bubble
+- [x] Commit `P1: overlay and pets`
 
 ## P2. Voice out
 - [ ] Phonon setup flow in settings (detect, ask to install uv/ptts, start, health poll)
@@ -79,6 +79,7 @@ Tick each task when it is done and verified (see AGENTS.md). Phases and their "D
 
 ## Notes
 
-- 2026-11-04: Set `debug = 1` in `src-tauri/Cargo.toml` for dev/test profiles to keep debuginfo lean and avoid exhausting disk space with MSVC PDBs.
-- 2026-11-04: Used `tauri::tray::TrayIconBuilder` and axum 0.8 `build_router` pattern with 5 unit tests covering health, auth token, and config serialization.
-
+- 2026-11-04: Set `debug = 0`, `incremental = false`, `strip = "debuginfo"` in `src-tauri/Cargo.toml` for dev/test profiles to keep debuginfo lean and avoid exhausting disk space with MSVC PDBs.
+- 2026-11-04: Used `tauri::tray::TrayIconBuilder` and axum 0.8 `build_router` pattern with 6 unit tests covering health, auth token, and config serialization.
+- 2026-11-04: Fixed `STATUS_ENTRYPOINT_NOT_FOUND (0xc0000139)` in test harness caused by `TaskDialogIndirect` in `comctl32.dll` requiring Common Controls v6; added `/MANIFESTDEPENDENCY` link argument in `build.rs` and aligned `windows` crate version to `0.62` across workspace.
+- 2026-11-04: Implemented P1 frontend: SVG PetComponent with 7 states (idle, working, talking, thinking, alert, happy, sleeping), SpeechBubbleComponent with action buttons, PetMenuManager with 200ms `mouseLeave` debounce, PetDragManager with coordinates persistence, ActivityFeedManager, and continuous click-through region synchronization.

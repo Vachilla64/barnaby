@@ -9,12 +9,14 @@ use axum::{
 use serde::{Deserialize, Serialize};
 use std::net::SocketAddr;
 use std::sync::Arc;
+use tauri::{AppHandle, Emitter};
 use tokio::net::TcpListener;
 
 #[derive(Clone)]
 pub struct ServerState {
     pub token: String,
     pub port: u16,
+    pub app_handle: Option<AppHandle>,
 }
 
 #[derive(Serialize)]
@@ -39,19 +41,32 @@ async fn agents_handler() -> Json<AgentsResponse> {
     Json(AgentsResponse { agents: vec![] })
 }
 
-#[derive(Deserialize)]
-struct SayPayload {
-    agent_kind: Option<String>,
-    text: String,
+#[derive(Deserialize, Serialize, Clone, Debug)]
+pub struct SayPayload {
+    pub agent_kind: Option<String>,
+    pub text: String,
 }
 
-async fn say_handler(Json(payload): Json<SayPayload>) -> impl IntoResponse {
+async fn say_handler(
+    State(state): State<Arc<ServerState>>,
+    Json(payload): Json<SayPayload>,
+) -> impl IntoResponse {
     tracing::info!(
         "Received say request: agent={:?}, text={}",
         payload.agent_kind,
         payload.text
     );
-    (StatusCode::OK, Json(serde_json::json!({ "status": "queued" })))
+
+    if let Some(app) = &state.app_handle {
+        if let Err(e) = app.emit("pet:say", &payload) {
+            tracing::error!("Failed to emit pet:say event: {}", e);
+        }
+    }
+
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({ "status": "queued" })),
+    )
 }
 
 async fn auth_middleware(
@@ -91,6 +106,7 @@ pub fn build_router(state: Arc<ServerState>) -> Router {
 pub async fn start_server(
     token: String,
     preferred_port: u16,
+    app_handle: Option<AppHandle>,
 ) -> Result<(u16, tokio::task::JoinHandle<()>), Box<dyn std::error::Error + Send + Sync>> {
     let mut bound_listener = None;
     let mut bound_port = preferred_port;
@@ -124,6 +140,7 @@ pub async fn start_server(
     let state = Arc::new(ServerState {
         token,
         port: bound_port,
+        app_handle,
     });
 
     let app = build_router(state);
@@ -148,6 +165,7 @@ mod tests {
         let state = Arc::new(ServerState {
             token: "testtoken123".to_string(),
             port: 4747,
+            app_handle: None,
         });
         let app = build_router(state);
 
@@ -171,6 +189,7 @@ mod tests {
         let state = Arc::new(ServerState {
             token: "secrettoken456".to_string(),
             port: 4747,
+            app_handle: None,
         });
         let app = build_router(state);
 
@@ -188,6 +207,7 @@ mod tests {
         let state = Arc::new(ServerState {
             token: "secrettoken456".to_string(),
             port: 4747,
+            app_handle: None,
         });
         let app = build_router(state);
 
