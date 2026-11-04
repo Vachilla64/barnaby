@@ -7,6 +7,7 @@ import { SpeechBubbleComponent } from "./bubble";
 import { PetMenuManager } from "./menu";
 import { ActivityFeedManager } from "./feed";
 import { PetDragManager } from "./drag";
+import { floorTop } from "./physics";
 import { initRegionWatcher, updateClickRegions } from "./regions";
 import { initSettingsView } from "./settings";
 import { PushToTalk } from "./ptt";
@@ -46,11 +47,13 @@ async function main() {
   const petCfg = config.pets[agentKind] || { colour: "#E8875B", x: null, y: null };
   const petColor = petCfg.colour || "#E8875B";
 
-  // Default placement: bottom right above taskbar
+  // Default placement: bottom right, standing on the floor (the top of the taskbar).
+  // A saved position is kept, but never below the floor.
+  const petHeight = 132;
+  const floorY = floorTop(petHeight);
   const defaultX = Math.max(100, window.innerWidth - 140);
-  const defaultY = Math.max(100, window.innerHeight - 120);
   const initialX = petCfg.x !== null && petCfg.x !== undefined ? petCfg.x : defaultX;
-  const initialY = petCfg.y !== null && petCfg.y !== undefined ? petCfg.y : defaultY;
+  const initialY = petCfg.y !== null && petCfg.y !== undefined ? Math.min(petCfg.y, floorY) : floorY;
 
   // 2. Instantiate Components
   const pet = new PetComponent(agentKind, petColor, initialX, initialY);
@@ -61,6 +64,7 @@ async function main() {
 
   // Mount to DOM
   appEl.appendChild(pet.element);
+  pet.setPosition(initialX, initialY); // sets which way he faces when guiding
   appEl.appendChild(bubble.element);
   appEl.appendChild(menuManager.leftMenuEl);
   appEl.appendChild(menuManager.rightMenuEl);
@@ -163,7 +167,7 @@ async function main() {
     const { sentence } = event.payload;
     if (!sentence) return;
     if (tourActive) {
-      pet.setState("talking");
+      pet.setState("guiding");
       return; // the tour bubble already shows this narration with its Back/Next/Stop buttons
     }
 
@@ -207,7 +211,7 @@ async function main() {
   }>("tour:step", (event) => {
     const t = event.payload;
     tourActive = true;
-    pet.setState("talking");
+    pet.setState("guiding"); // turns his back and gestures at the screen
     const shortPath = t.path.split(/[\\/]/).slice(-2).join("/");
     const where = t.vscode ? "" : `${shortPath}:${t.start_line} - `;
     bubble.show(
@@ -258,7 +262,7 @@ async function main() {
   // Agent link (P3): hooks and MCP tools move the pet between states
   await listen<{ agent_kind: string; state: string; text?: string | null }>("agent:state", (event) => {
     const { state, text } = event.payload;
-    if (pet.state === "talking" && state !== "alert") return;
+    if ((pet.state === "talking" || pet.state === "guiding") && state !== "alert") return;
     pet.setState(state as PetState);
     if (text) feedManager.addItem(text);
   });

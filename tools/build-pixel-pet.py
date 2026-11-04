@@ -99,6 +99,66 @@ MOUTH_OPEN = ([(x, 23, "Z") for x in range(14, 18)] + [(x, 24, "Z") for x in ran
                  (16, 25, "E"), (17, 25, "E")])
 
 
+# --- scared face (picked up or falling) --------------------------------------------------------
+WIDE_LEFT = [(x, y, "Y") for x in range(9, 13) for y in range(16, 20)] + [(10, 17, "E"), (11, 17, "E"), (10, 18, "E"), (11, 18, "E")]
+WIDE_RIGHT = [(x, y, "Y") for x in range(19, 23) for y in range(16, 20)] + [(20, 17, "E"), (21, 17, "E"), (20, 18, "E"), (21, 18, "E")]
+MOUTH_O = ([(15, 23, "E"), (16, 23, "E"), (14, 24, "E"), (17, 24, "E"), (14, 25, "E"), (17, 25, "E"),
+            (15, 26, "E"), (16, 26, "E")] + [(15, 24, "Z"), (16, 24, "Z"), (15, 25, "Z"), (16, 25, "Z")])
+
+# Front arms are the outer sleeve columns of the jacket (rows 31-38). They are drawn as their own
+# groups so they can swing. The hands only show while he is picked up.
+ARM_ROWS = (31, 38)
+ARM_LEFT_MAX_X, ARM_RIGHT_MIN_X = 10, 21
+HAND_L = [(7, 39, "F"), (8, 39, "F"), (7, 40, "F"), (8, 40, "F")]
+
+# --- back view: he turns to face the screen while guiding --------------------------------------
+# Rows 14-39, drawn under the same hat as the front. Arms are separate layers (see below).
+BACK_ROWS = [
+    (6, "wWWWWWWWWWWWWWWWWWWw"),   # 14
+    (6, "WWWWWWWWWWWWWWWWWWWW"),   # 15
+    (6, "WWWWwWWWWWWWWWWWWWWW"),   # 16
+    (6, "WWWWWWWWWWWwWWWWWWWW"),   # 17
+    (6, "WWwWWWWWWWWWWWWWwWWW"),   # 18
+    (6, "WWWWWWWWWWWWwWWWWWWW"),   # 19
+    (6, "WWWWWWWWWWWWWWWWWWWW"),   # 20
+    (6, "wWWWWWWWWWWWWWWWWWWw"),   # 21
+    (7, "wWWWWWWWWWWWWWWWWw"),     # 22
+    (8, "wWWWWWWWWWWWWWWw"),       # 23
+    (9, "wWWWWWWWWWWWWw"),         # 24
+    (10, "wwWWWWWWWWww"),          # 25
+    (10, "wWWSSSSSSWWw"),          # 26 neck
+    (12, "wsSSSSsw"),              # 27
+    (11, "FFFFFFFFFF"),            # 28 collar
+    (9, "KKKKKKKKKKKKKK"),         # 29
+    (8, "KKKKKKKKKKKKKKKK"),       # 30 shoulders
+] + [(11, "KKKKkkKKKK")] * 8 + [   # 31-38 back of the jacket, centre seam
+    (8, "KKKKKKKkkKKKKKKK"),       # 39 tails
+]
+BACK_START = 14
+EARS = [(5, 17, "S"), (5, 18, "S"), (5, 19, "s"), (26, 17, "S"), (26, 18, "S"), (26, 19, "s")]
+
+
+def rows_at(spec):
+    """spec: list of (y, x_offset, text) -> pixels."""
+    return [(x + dx, y, ch) for y, x, text in spec for dx, ch in enumerate(text) if ch != "."]
+
+
+def mirror(px):
+    """Flip across the body's centre line (x -> 31 - x)."""
+    return [(31 - x, y, ch) for x, y, ch in px]
+
+
+# Left arm (screen left) layers for the back view.
+ARM_DOWN_L = rows_at([(y, 7, "KKKk") for y in range(31, 37)] + [(37, 7, "FFF"), (38, 7, "SSS"), (39, 7, "SSS")])
+ARM_POINT_L = rows_at([
+    (21, 1, "S"), (22, 1, "SS"), (23, 1, "SSS"), (24, 2, "SSS"), (25, 3, "FFF"),
+    (26, 4, "KKk"), (27, 5, "KKk"), (28, 6, "KKk"), (29, 7, "KKk"), (30, 8, "KKk"),
+])
+ARM_PRESENT_L = rows_at([
+    (28, 1, "S"), (29, 0, "SSS"), (30, 0, "SSSFKKKKKKK"), (31, 0, "SSSFKKKKKKK"), (32, 0, "SSSFkkkkkkk"),
+])
+
+
 def pixels(layer_rows, start_row=0):
     out = []
     for dy, (off, text) in enumerate(layer_rows):
@@ -126,39 +186,75 @@ def rects(px):
     return "".join(parts)
 
 
-def build_svg():
-    body = pixels(BODY, BODY_START)
-    body_set = {(x, y) for x, y, _ in body}
-    hat_px = [p for p in body if p[1] <= 13]
-    rest_px = [p for p in body if p[1] > 13]
-    assert all(0 <= x < W and 0 <= y < H for x, y, _ in body), "pixel outside the grid"
+def is_arm(x, y):
+    return ARM_ROWS[0] <= y <= ARM_ROWS[1] and (x <= ARM_LEFT_MAX_X or x >= ARM_RIGHT_MIN_X)
+
+
+def parts():
+    """Split the art into the pixel lists the SVG and the preview both use."""
     assert len(BODY) == H, f"body has {len(BODY)} rows, expected {H}"
-    rest_px = [p for p in rest_px if (p[0], p[1]) not in {(x, y) for x, y, _ in POCKET_SQUARE}] + POCKET_SQUARE
-    svg = (
-        f'<svg viewBox="0 0 {W} {H}" width="{W * 3}" height="{H * 3}" class="pet-svg" '
-        'xmlns="http://www.w3.org/2000/svg" shape-rendering="crispEdges">'
-        f'<g class="pet-body"><g class="pet-hat">{rects(hat_px)}</g>{rects(rest_px)}</g>'
-        f'<g class="pet-brows">{rects(pixels([], 0) + BROWS)}</g>'
+    assert len(BACK_ROWS) == 26, f"back view has {len(BACK_ROWS)} rows, expected 26"
+    for off, text in BACK_ROWS:
+        assert 0 <= off and off + len(text) <= W
+    body = pixels(BODY, BODY_START)
+    assert all(0 <= x < W and 0 <= y < H for x, y, _ in body), "pixel outside the grid"
+    hat = [p for p in body if p[1] <= 13]
+    torso = [p for p in body if 13 < p[1] < 40]
+    legs = [p for p in body if p[1] >= 40]
+    pocket = {(x, y) for x, y, _ in POCKET_SQUARE}
+    torso = [p for p in torso if (p[0], p[1]) not in pocket] + POCKET_SQUARE
+    arm_l = [p for p in torso if is_arm(p[0], p[1]) and p[0] <= ARM_LEFT_MAX_X]
+    arm_r = [p for p in torso if is_arm(p[0], p[1]) and p[0] >= ARM_RIGHT_MIN_X]
+    torso_rest = [p for p in torso if not is_arm(p[0], p[1])]
+    return {
+        "hat": hat, "torso_rest": torso_rest, "arm_l": arm_l, "arm_r": arm_r, "legs": legs,
+        "leg_l": [p for p in legs if p[0] <= 15], "leg_r": [p for p in legs if p[0] >= 16],
+        "back": pixels(BACK_ROWS, BACK_START) + EARS,
+    }
+
+
+def build_svg():
+    p = parts()
+    front = (
+        '<g class="view view-front">'
+        f'<g class="pet-body"><g class="pet-hat">{rects(p["hat"])}</g>{rects(p["torso_rest"])}</g>'
+        f'<g class="leg leg-left">{rects(p["leg_l"])}</g><g class="leg leg-right">{rects(p["leg_r"])}</g>'
+        f'<g class="arm arm-left"><g class="arm-px">{rects(p["arm_l"])}</g><g class="hand">{rects(HAND_L)}</g></g>'
+        f'<g class="arm arm-right"><g class="arm-px">{rects(p["arm_r"])}</g><g class="hand">{rects(mirror(HAND_L))}</g></g>'
+        f'<g class="pet-brows">{rects(BROWS)}</g>'
         f'<g class="pet-eye pet-eye-left"><g class="eye-open"><g class="eye-pupil">{rects(LEFT_EYE_OPEN)}</g></g>'
-        f'<g class="eye-closed">{rects(LEFT_EYE_CLOSED)}</g></g>'
+        f'<g class="eye-closed">{rects(LEFT_EYE_CLOSED)}</g><g class="eye-wide">{rects(WIDE_LEFT)}</g></g>'
         f'<g class="monocle"><g class="monocle-lens">{rects(MONOCLE_LENS)}</g>'
         f'<g class="pet-eye pet-eye-right"><g class="eye-open"><g class="eye-pupil">{rects(RIGHT_EYE_OPEN)}</g></g>'
-        f'<g class="eye-closed">{rects(RIGHT_EYE_CLOSED)}</g></g>'
+        f'<g class="eye-closed">{rects(RIGHT_EYE_CLOSED)}</g><g class="eye-wide">{rects(WIDE_RIGHT)}</g></g>'
         f'<g class="monocle-ring">{rects(MONOCLE_RING)}</g></g>'
         f'<g class="pet-mouth-group"><g class="mouth-idle">{rects(MOUTH_IDLE)}</g>'
-        f'<g class="mouth-open">{rects(MOUTH_OPEN)}</g></g>'
-        "</svg>"
+        f'<g class="mouth-open">{rects(MOUTH_OPEN)}</g><g class="mouth-o">{rects(MOUTH_O)}</g></g>'
+        "</g>"
     )
-    return svg
+    back = (
+        '<g class="view view-back">'
+        f'<g class="pet-body"><g class="pet-hat">{rects(p["hat"])}</g>{rects(p["back"])}</g>'
+        f'<g class="back-legs">{rects(p["legs"])}</g>'
+        f'<g class="arm-down-l">{rects(ARM_DOWN_L)}</g><g class="arm-down-r">{rects(mirror(ARM_DOWN_L))}</g>'
+        f'<g class="arm-point">{rects(ARM_POINT_L)}</g><g class="arm-present">{rects(ARM_PRESENT_L)}</g>'
+        "</g>"
+    )
+    return (
+        f'<svg viewBox="0 0 {W} {H}" width="{W * 3}" height="{H * 3}" class="pet-svg" '
+        'xmlns="http://www.w3.org/2000/svg" shape-rendering="crispEdges">' + front + back + "</svg>"
+    )
 
 
 def preview(path):
     from PIL import Image
 
-    scale = 12
-    sheet = Image.new("RGBA", (W * scale * 3 + 40, H * scale + 20), (222, 222, 230, 255))
+    scale = 10
+    cols = 5
+    sheet = Image.new("RGBA", (W * scale * cols + 10 * (cols + 1), H * scale + 20), (96, 116, 138, 255))
 
-    def draw(dx, layers):
+    def draw(slot, layers):
+        dx = 10 + slot * (W * scale + 10)
         for x, y, ch in layers:
             hexv = PALETTE[ch].lstrip("#")
             col = tuple(int(hexv[i:i + 2], 16) for i in (0, 2, 4)) + (255,)
@@ -166,11 +262,15 @@ def preview(path):
                 for xx in range(scale):
                     sheet.putpixel((dx + x * scale + xx, 10 + y * scale + yy), col)
 
-    base = pixels(BODY) + POCKET_SQUARE
+    p = parts()
+    front = p["hat"] + p["torso_rest"] + p["legs"] + p["arm_l"] + p["arm_r"]
     face = BROWS + MONOCLE_LENS + MONOCLE_RING
-    draw(10, base + face + LEFT_EYE_OPEN + RIGHT_EYE_OPEN + MOUTH_IDLE)
-    draw(W * scale + 20, base + face + LEFT_EYE_OPEN + RIGHT_EYE_OPEN + MOUTH_OPEN)
-    draw(W * scale * 2 + 30, base + face + LEFT_EYE_CLOSED + RIGHT_EYE_CLOSED + MOUTH_IDLE)
+    back = p["hat"] + p["back"] + p["legs"]
+    draw(0, front + face + LEFT_EYE_OPEN + RIGHT_EYE_OPEN + MOUTH_IDLE)
+    draw(1, front + face + WIDE_LEFT + WIDE_RIGHT + MOUTH_O + HAND_L + mirror(HAND_L))
+    draw(2, front + face + LEFT_EYE_CLOSED + RIGHT_EYE_CLOSED + MOUTH_IDLE)
+    draw(3, back + ARM_POINT_L + mirror(ARM_DOWN_L))
+    draw(4, back + ARM_PRESENT_L + mirror(ARM_DOWN_L))
     sheet.save(path)
 
 

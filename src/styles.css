@@ -761,3 +761,154 @@ body.settings-window {
 .state-sleeping .pet-hat {
   transform: translate(-1px, 1px);
 }
+
+/* ==========================================================================
+   Barnaby: picked up, falling, landing, and guiding with his back turned
+   ========================================================================== */
+.eye-wide,
+.mouth-o,
+.hand,
+.view-back {
+  display: none;
+}
+
+/* Held or falling: wide eyes, round mouth, flailing arms, kicking legs */
+.pet-container:is(.grabbed, .falling) {
+  animation: none;
+}
+.pet-container:is(.grabbed, .falling) .eye-open,
+.pet-container:is(.grabbed, .falling) .eye-closed,
+.pet-container:is(.grabbed, .falling) .mouth-idle,
+.pet-container:is(.grabbed, .falling) .mouth-open,
+.pet-container:is(.grabbed, .falling) .view-back,
+.pet-container:is(.grabbed, .falling) .accessory {
+  display: none !important;
+}
+.pet-container:is(.grabbed, .falling) .eye-wide,
+.pet-container:is(.grabbed, .falling) .mouth-o,
+.pet-container:is(.grabbed, .falling) .hand,
+.pet-container:is(.grabbed, .falling) .view-front {
+  display: block;
+}
+.pet-container:is(.grabbed, .falling) .pet-brows,
+.pet-container:is(.grabbed, .falling) .pet-hat {
+  animation: none;
+  transform: translateY(-1px);
+}
+.pet-container:is(.grabbed, .falling) .arm-left {
+  transform-origin: 9px 31px;
+  animation: flail-left 0.2s steps(1) infinite alternate;
+}
+.pet-container:is(.grabbed, .falling) .arm-right {
+  transform-origin: 22px 31px;
+  animation: flail-right 0.2s steps(1) infinite alternate;
+}
+.pet-container:is(.grabbed, .falling) .leg-left {
+  animation: kick-left 0.22s steps(1) infinite alternate;
+}
+.pet-container:is(.grabbed, .falling) .leg-right {
+  animation: kick-right 0.22s steps(1) infinite alternate;
+}
+.pet-container.grabbed .pet-svg {
+  transform-origin: 50% 10%;
+  animation: dangle 0.5s ease-in-out infinite alternate;
+}
+@keyframes flail-left {
+  from { transform: rotate(120deg); }
+  to { transform: rotate(165deg); }
+}
+@keyframes flail-right {
+  from { transform: rotate(-165deg); }
+  to { transform: rotate(-120deg); }
+}
+@keyframes kick-left {
+  from { transform: translate(-1px, -1px); }
+  to { transform: translate(1px, 0); }
+}
+@keyframes kick-right {
+  from { transform: translate(1px, 0); }
+  to { transform: translate(-1px, -1px); }
+}
+@keyframes dangle {
+  from { transform: rotate(-4deg); }
+  to { transform: rotate(4deg); }
+}
+
+/* Landing: squash, eyes squeezed shut, hat pops up */
+.pet-container.landed {
+  animation: pet-land 0.45s ease-out;
+}
+.pet-container.landed .eye-open {
+  display: none;
+}
+.pet-container.landed .eye-closed {
+  display: block;
+}
+.pet-container.landed .pet-hat {
+  animation: hat-pop 0.45s steps(1);
+}
+@keyframes pet-land {
+  0% { transform: scale(1.2, 0.76); }
+  35% { transform: scale(0.94, 1.08); }
+  70% { transform: scale(1.04, 0.97); }
+  100% { transform: scale(1, 1); }
+}
+@keyframes hat-pop {
+  0% { transform: translateY(-4px); }
+  40% { transform: translateY(-2px); }
+  70% { transform: translateY(1px); }
+  100% { transform: translateY(0); }
+}
+
+/* Guiding (tours, and telling you what to do): back to us, one arm gesturing at the screen.
+   The art points left; when he stands in the left half of the screen he is mirrored. */
+.state-guiding {
+  animation: guide-sway 1.6s ease-in-out infinite alternate;
+}
+.state-guiding .view-front {
+  display: none;
+}
+.state-guiding .view-back {
+  display: block;
+}
+.state-guiding.mirror .pet-svg {
+  transform: scaleX(-1);
+}
+.state-guiding .pet-hat {
+  animation: hat-nod 0.44s steps(1) infinite alternate;
+}
+.arm-down-l,
+.arm-down-r,
+.arm-point,
+.arm-present {
+  visibility: hidden;
+}
+.state-guiding .arm-down-r {
+  visibility: visible;
+}
+.state-guiding .arm-point {
+  animation: gesture-point 3s linear infinite;
+}
+.state-guiding .arm-present {
+  animation: gesture-present 3s linear infinite;
+}
+.state-guiding .arm-down-l {
+  animation: gesture-rest 3s linear infinite;
+}
+@keyframes guide-sway {
+  from { transform: translateY(0); }
+  to { transform: translateY(-2px); }
+}
+@keyframes gesture-point {
+  0%, 39.9% { visibility: visible; }
+  40%, 100% { visibility: hidden; }
+}
+@keyframes gesture-present {
+  0%, 39.9% { visibility: hidden; }
+  40%, 79.9% { visibility: visible; }
+  80%, 100% { visibility: hidden; }
+}
+@keyframes gesture-rest {
+  0%, 79.9% { visibility: hidden; }
+  80%, 100% { visibility: visible; }
+}

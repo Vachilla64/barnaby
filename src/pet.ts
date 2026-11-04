@@ -44,6 +44,7 @@ export class PetComponent {
     this.element.style.left = `${initialX}px`;
     this.element.style.top = `${initialY}px`;
     this.element.innerHTML = createPetSvg(color);
+    this.updateFacing(initialX);
   }
 
   public setState(state: PetState): void {
@@ -56,6 +57,13 @@ export class PetComponent {
   public setPosition(x: number, y: number): void {
     this.element.style.left = `${x}px`;
     this.element.style.top = `${y}px`;
+    this.updateFacing(x);
+  }
+
+  /** While guiding he turns his back and gestures toward the middle of the screen. */
+  private updateFacing(x: number): void {
+    const centre = x + this.element.offsetWidth / 2;
+    this.element.classList.toggle("mirror", centre < window.innerWidth / 2);
   }
 
   public getPosition(): { x: number; y: number } {

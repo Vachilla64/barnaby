@@ -12,7 +12,8 @@ export type PetState =
   | "thinking"
   | "alert"
   | "happy"
-  | "sleeping";
+  | "sleeping"
+  | "guiding";
 
 export interface FeedItem {
   time: string;
