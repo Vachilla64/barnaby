@@ -9,6 +9,8 @@ import { ActivityFeedManager } from "./feed";
 import { PetDragManager } from "./drag";
 import { initRegionWatcher, updateClickRegions } from "./regions";
 import { initSettingsView } from "./settings";
+import { PushToTalk } from "./ptt";
+import { toBase64 } from "./wav";
 
 async function main() {
   const currentWindow = getCurrentWebviewWindow();
@@ -109,6 +111,25 @@ async function main() {
     feedManager.onPetMouseLeave();
   });
 
+  const repeatLast = () => {
+    const items = feedManager.getItems();
+    if (items.length > 0) {
+      pet.setState("talking");
+      bubble.show(items[0].text, [], 4000);
+      setTimeout(() => pet.setState("idle"), 3000);
+    }
+  };
+
+  const muteVoice = async () => {
+    try {
+      await invoke("set_voice_enabled", { enabled: false });
+      bubble.show("Voice notifications muted.", [], 2500);
+      feedManager.addItem("Voice muted");
+    } catch (e) {
+      console.error("Failed to mute voice:", e);
+    }
+  };
+
   // Menu Callbacks
   menuManager.setCallbacks({
     onAsk: (question) => {
@@ -131,24 +152,8 @@ async function main() {
         pet.setState("idle");
       });
     },
-    onRepeat: () => {
-      const items = feedManager.getItems();
-      if (items.length > 0) {
-        const last = items[0].text;
-        pet.setState("talking");
-        bubble.show(last, [], 4000);
-        setTimeout(() => pet.setState("idle"), 3000);
-      }
-    },
-    onMute: async () => {
-      try {
-        await invoke("set_voice_enabled", { enabled: false });
-        bubble.show("Voice notifications muted.", [], 2500);
-        feedManager.addItem("Voice muted");
-      } catch (e) {
-        console.error("Failed to mute voice:", e);
-      }
-    },
+    onRepeat: () => repeatLast(),
+    onMute: () => void muteVoice(),
   });
 
   // 4. Listen for backend speech events (P2 Voice Out)
@@ -274,6 +279,43 @@ async function main() {
       }
     }, Math.max(2500, text.length * 60));
   });
+
+  // Voice in (P6): hold the push-to-talk key to speak; release to send
+  const ptt = new PushToTalk();
+  await listen("ptt:start", async () => {
+    pet.setState("thinking");
+    bubble.show("Listening...", [], 0);
+    try {
+      await ptt.start();
+    } catch (e) {
+      console.error("Microphone unavailable:", e);
+      bubble.show("I can't use the microphone. Check Windows microphone permission.", [], 5000);
+      pet.setState("idle");
+    }
+  });
+  await listen("ptt:stop", async () => {
+    const recording = ptt.stop();
+    if (!recording) {
+      bubble.hide();
+      pet.setState("idle");
+      return;
+    }
+    bubble.show("One moment...", [], 0);
+    try {
+      await invoke("ptt_audio", { wavBase64: toBase64(recording.wav) });
+    } catch (e) {
+      console.error("ptt_audio failed:", e);
+      bubble.show("I didn't catch that.", [], 3000);
+      pet.setState("idle");
+    }
+  });
+  await listen("ptt:fallback", () => {
+    pet.setState("idle");
+    const pos = pet.getPosition();
+    menuManager.showLeftMenu(pos.x, Math.max(10, pos.y - 140));
+  });
+  await listen("command:repeat", () => repeatLast());
+  await listen("command:mute", () => void muteVoice());
 
   // Start region watcher for click-through
   initRegionWatcher();

@@ -7,6 +7,7 @@ pub mod mcp;
 pub mod overlay;
 pub mod server;
 pub mod tours;
+pub mod voice_in;
 pub mod vscode;
 pub mod voice;
 
@@ -37,6 +38,51 @@ fn overlay_ready(app: tauri::AppHandle) {
     OVERLAY_READY.store(true, std::sync::atomic::Ordering::SeqCst);
     if let Some(w) = app.get_webview_window("overlay") {
         let _ = w.show();
+    }
+}
+
+/// A finished push-to-talk recording (base64 WAV) from the overlay page.
+#[tauri::command]
+async fn ptt_audio(wav_base64: String, state: tauri::State<'_, Arc<server::ServerState>>) -> Result<(), String> {
+    use base64::Engine;
+    let wav = base64::engine::general_purpose::STANDARD
+        .decode(wav_base64)
+        .map_err(|e| format!("bad audio: {e}"))?;
+    let st = state.inner().clone();
+    tokio::spawn(async move {
+        voice_in::handle_recording(st, wav).await;
+    });
+    Ok(())
+}
+
+static PTT_HELD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
+/// Hold the shortcut to talk. Pressing it also cuts any speech (barge-in).
+fn register_push_to_talk(app: &tauri::AppHandle, core: Arc<server::ServerState>, shortcut: &str) {
+    use std::sync::atomic::Ordering;
+    use tauri::Emitter;
+    use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
+    let result = app.global_shortcut().on_shortcut(shortcut, move |app, _shortcut, event| match event.state() {
+        ShortcutState::Pressed => {
+            if !PTT_HELD.swap(true, Ordering::SeqCst) {
+                let core = core.clone();
+                tauri::async_runtime::spawn(async move {
+                    if let Some(q) = &core.speech_queue {
+                        q.stop_speech().await;
+                    }
+                });
+                let _ = app.emit("ptt:start", ());
+            }
+        }
+        ShortcutState::Released => {
+            if PTT_HELD.swap(false, Ordering::SeqCst) {
+                let _ = app.emit("ptt:stop", ());
+            }
+        }
+    });
+    match result {
+        Ok(()) => tracing::info!("Push-to-talk registered on {shortcut}"),
+        Err(e) => tracing::warn!("Could not register push-to-talk {shortcut}: {e}"),
     }
 }
 
@@ -115,6 +161,7 @@ pub fn run() {
 
     tauri::Builder::default()
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .manage(OverlayState {
             clickthrough: clickthrough_for_state,
         })
@@ -126,6 +173,7 @@ pub fn run() {
             overlay::open_settings,
             overlay::exit_app,
             overlay_ready,
+            ptt_audio,
             ask_question,
             accept_tour,
             tour_control,
@@ -307,6 +355,7 @@ pub fn run() {
                 tours,
             });
             app.manage(core.clone());
+            register_push_to_talk(app.handle(), core.clone(), &app_config.push_to_talk);
 
             // Start axum server in tokio runtime
             tauri::async_runtime::spawn(async move {

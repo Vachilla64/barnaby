@@ -312,7 +312,17 @@ fn pick_project(state: &ServerState) -> Option<PathBuf> {
         .map(PathBuf::from)
 }
 
-async fn say_error(state: &ServerState, text: &str) {
+pub fn open_settings_window(state: &ServerState) {
+    if let Some(app) = &state.app_handle {
+        use tauri::Manager;
+        if let Some(w) = app.get_webview_window("settings") {
+            let _ = w.show();
+            let _ = w.set_focus();
+        }
+    }
+}
+
+pub async fn speak_error(state: &ServerState, text: &str) {
     emit_agent_state(state, BRAIN_KIND, "alert", Some(text));
     speak(state, BRAIN_KIND, text, Priority::High, SpeechKind::Alert).await;
 }
@@ -323,19 +333,13 @@ pub async fn ask_and_present(state: Arc<ServerState>, question: String) -> Optio
     let key = match key_for(&cfg.brain) {
         Ok(k) => k,
         Err(_) => {
-            if let Some(app) = &state.app_handle {
-                use tauri::Manager;
-                if let Some(w) = app.get_webview_window("settings") {
-                    let _ = w.show();
-                    let _ = w.set_focus();
-                }
-            }
-            say_error(&state, "I need a Meta API key first. I opened settings.").await;
+            open_settings_window(&state);
+            speak_error(&state, "I need a Meta API key first. I opened settings.").await;
             return None;
         }
     };
     let Some(root) = pick_project(&state) else {
-        say_error(&state, "Which project? Open it in VS Code and ask again.").await;
+        speak_error(&state, "Which project? Open it in VS Code and ask again.").await;
         return None;
     };
 
@@ -370,7 +374,7 @@ pub async fn ask_and_present(state: Arc<ServerState>, question: String) -> Optio
         }
         Err(e) => {
             tracing::error!("Brain error: {e}");
-            say_error(&state, "I couldn't reach my brain just now. Try again in a moment.").await;
+            speak_error(&state, "I couldn't reach my brain just now. Try again in a moment.").await;
             None
         }
     }

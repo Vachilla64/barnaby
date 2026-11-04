@@ -63,11 +63,11 @@ Tick each task when it is done and verified (see AGENTS.md). Phases and their "D
 - [ ] Commit `P5: tours`
 
 ## P6. Voice in
-- [ ] Global push-to-talk shortcut (hold)
-- [ ] Mic recording in page (MediaRecorder), bytes to Rust
-- [ ] Transcription with `muse-voice-transcribe-1.0` (verify endpoint; note it below)
-- [ ] Command matcher (next, back, stop, pause, continue, repeat, mute, ask_user answers) with unit tests
-- [ ] Barge-in: push-to-talk stops speech
+- [x] Global push-to-talk shortcut (hold)
+- [x] Mic recording in page (MediaRecorder), bytes to Rust
+- [x] Transcription with `muse-voice-transcribe-1.0` (verify endpoint; note it below)
+- [x] Command matcher (next, back, stop, pause, continue, repeat, mute, ask_user answers) with unit tests
+- [x] Barge-in: push-to-talk stops speech
 - [ ] Commit `P6: voice in`
 
 ## P7. Demo and submission
@@ -95,3 +95,24 @@ Tick each task when it is done and verified (see AGENTS.md). Phases and their "D
 - 2026-11-04: Install the extension with `code --install-extension vscode-extension/barnaby-vscode-0.1.0.vsix` (or Extensions > Install from VSIX). Rebuild with `pnpm package` in `vscode-extension/`.
 - 2026-11-04: Meta API facts (docs read 2026-11-04): chat completions at `POST https://api.meta.ai/v1/chat/completions`; only `tool_choice: "auto"`; send the full assistant message with `tool_calls` before the `tool` messages; `system` is accepted (`developer` preferred); `response_format: {type: "json_schema", json_schema: {name, schema}}` is supported (Barnaby does not use it yet, it asks for JSON in the prompt and validates); `stop`, `n>1`, `logprobs`, penalties are rejected; `reasoning_effort: "none"` is rejected. Transcription: `POST https://api.meta.ai/v1/asr/transcribe`, multipart with a JSON part `request` (`{"mode":"PUSH_TO_TALK","model":"muse-voice-transcribe-1.0","audioEncoding":"WAV"}`) and an `audio` part; WAV only, mono, 16-bit PCM, 16 or 24 kHz; reply `{"transcript": "..."}`.
 - 2026-11-04: INCIDENT: a dev run with the Vite server down made the overlay show a full-screen browser error page over the user's desktop. Fix: the overlay window now starts hidden and is shown only when the page calls `overlay_ready`; if that does not happen within 10 s the backend closes it. Also fixed `capabilities/default.json`, which listed a window `main` that is closed at startup instead of `overlay` and `settings`. Rule for agents: do not launch the overlay with `cargo run --no-default-features` unless the Vite server is up; prefer `pnpm tauri dev`, and tell the user before launching a visible window.
+
+## Handoff (2026-11-04, ~23:55 local; deadline 02:00 local = 9 PM ET)
+
+State: P0 to P5 and P7 are built and committed (up to 5ca7f5a). P6 voice-in is in progress by ANOTHER session in the same checkout (uncommitted: `src-tauri/src/voice_in.rs`, `src/ptt.ts`, `src/wav.ts`, edits to `lib.rs`, `main.ts`, `Cargo.toml`). Pet art is in `character-design/` by yet another agent (README there says it is isolated from `src/`). Do not edit those files from a second session.
+
+Uncommitted by the P3-P5 session (safe to commit): `agents.rs` (sleep after 10 min, remove after 60, with a unit test), `server.rs` (30 s sweep task), `voice/queue.rs` (`stop_speech` no longer clears `is_playing`, which allowed two pipelines), `brain/mod.rs` (the other session split `say_error` into `speak_error` and `open_settings_window`).
+
+Run it safely: `pnpm build`, then in `src-tauri` run `cargo build --features tauri/custom-protocol` and start `target/debug/barnaby.exe`. Never run `cargo run --no-default-features` without a live Vite server: the overlay then shows a browser error page over the whole screen (this happened once). The overlay is now hidden until the page calls `overlay_ready`, with a 10 s watchdog.
+
+Inspect the UI without touching the mouse: start the exe with `WEBVIEW2_ADDITIONAL_BROWSER_ARGUMENTS=--remote-debugging-port=9222`, then drive it over CDP (screenshot, evaluate JS, read console).
+
+Open items, most valuable first:
+- [ ] Real Meta API key test (none on this machine). Settings > Brain > Test, then ask a question about `demo-project/`.
+- [ ] Real VS Code or Antigravity test of the `.vsix` (`vscode-extension/barnaby-vscode-0.1.0.vsix`); only a fake client was used.
+- [ ] Real Claude Code MCP call (CLI here is signed out). Hooks were verified live: SessionEnd moved the pet to `sleeping`.
+- [ ] P6 voice in (other session). Meta transcription: `POST https://api.meta.ai/v1/asr/transcribe`, multipart `request` JSON + `audio` WAV mono 16-bit 16/24 kHz.
+- [ ] One pet per agent kind in the overlay (backend registry is ready; overlay shows one pet).
+- [ ] Gemini Connect button (README has the manual steps; Gemini MCP URL needs `?kind=gemini-cli`).
+- [ ] Demo recording and submission form (user).
+- Known flaws: a port fallback is saved to config.json and never returns to 4747; `barnaby_ask_user` returns "no answer" (no bubble buttons yet).
+- 2026-11-04: P6 built. Verified without the app: command matcher unit tests (questions are not claimed), a Rust test that posts the multipart request to a local fake `/v1/asr/transcribe`, and a Node check of the WAV encoder (16 kHz mono 16-bit, correct header). NOT verified: the global shortcut firing, the WebView2 microphone permission prompt, and real transcription (no Meta key here). Recording uses AudioContext + ScriptProcessor, not MediaRecorder, so no conversion is needed. `ask_user` spoken answers are not wired (the tool returns "no answer"). First use will show the Windows/WebView2 microphone permission; if it never appears, grant microphone access to Barnaby in Windows privacy settings.
