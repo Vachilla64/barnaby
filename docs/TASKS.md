@@ -3,13 +3,13 @@
 Tick each task when it is done and verified (see AGENTS.md). Phases and their "Done when" checks are in [SPEC.md section 9](SPEC.md#9-phases-and-acceptance-criteria).
 
 ## P0. Scaffold
-- [ ] `git mv Cargo.toml Cargo.lock src prototype/`
-- [ ] Create Tauri 2 app at repo root (Vite, vanilla TypeScript); app name `Devy`, identifier `dev.devy.app`
-- [ ] Config file `%APPDATA%\Devy\config.json` with port and token (SPEC 6)
-- [ ] Logging to `%APPDATA%\Devy\logs` (`tracing`)
-- [ ] axum server on 127.0.0.1:4747 (fallback 4748-4757), `GET /health`, token middleware
-- [ ] Tray icon: Settings, Quit
-- [ ] Commit `P0: scaffold`
+- [x] `git mv Cargo.toml Cargo.lock src prototype/`
+- [x] Create Tauri 2 app at repo root (Vite, vanilla TypeScript); app name `Devy`, identifier `dev.devy.app`
+- [x] Config file `%APPDATA%\Devy\config.json` with port and token (SPEC 6)
+- [x] Logging to `%APPDATA%\Devy\logs` (`tracing`)
+- [x] axum server on 127.0.0.1:4747 (fallback 4748-4757), `GET /health`, token middleware
+- [x] Tray icon: Settings, Quit
+- [x] Commit `P0: scaffold`
 
 ## P1. Overlay and pets
 - [ ] Overlay window over all monitors: transparent, no decorations, always on top, skip taskbar
@@ -79,4 +79,6 @@ Tick each task when it is done and verified (see AGENTS.md). Phases and their "D
 
 ## Notes
 
-(Agents: add decisions, API details and workarounds here, newest first, with the date.)
+- 2026-11-04: Set `debug = 1` in `src-tauri/Cargo.toml` for dev/test profiles to keep debuginfo lean and avoid exhausting disk space with MSVC PDBs.
+- 2026-11-04: Used `tauri::tray::TrayIconBuilder` and axum 0.8 `build_router` pattern with 5 unit tests covering health, auth token, and config serialization.
+
