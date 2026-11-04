@@ -7,12 +7,12 @@ You are building **Barnaby**, a Windows desktop pet app that speaks for coding a
 1. **Work phase by phase** (P0 to P7 in SPEC section 9). Do not start a phase before the previous one meets its "Done when" line.
 2. **At the start of a session**, read `docs/TASKS.md` and continue from the first unchecked task.
 3. **After each task**, tick it in `docs/TASKS.md`. Add a short note under "Notes" if you learned something the next agent needs (an API detail, a workaround, a decision).
-4. **Commit after each phase** (and after any large task) with a message like `P2: speech queue with throttle`. Push to `origin main`.
+4. **Commit often.** Commit after every change that works (a feature, a fix, new art, a docs update), and at least every 15 minutes while you are editing. Small commits with a clear message, like `Pet: gravity and drop physics`. Never leave hours of work uncommitted. Do not wait for a phase to end. Stage only the files you changed (not `character-design/`). Push to `origin main` only if a remote exists.
 5. **Type-check often:** `cargo check` in `src-tauri`, `npx tsc --noEmit` in the frontend and in `vscode-extension`.
 6. **The running exe is locked.** Close Barnaby before a full rebuild, and rebuild before asking the user to test. Never report a feature as done after only compiling.
 7. **Test what is pure** (command matcher, sentence splitter, throttle, hook mapping, tour validation) with `cargo test`. Test the desktop behaviour by hand, with the user driving. **Never move the user's mouse or type into their windows** to test.
 8. **If the spec is unclear or wrong**, pick the simplest option that serves the demo story (SPEC section 2), write the decision under "Notes" in TASKS.md, and keep going. Ask the user only when the choice is expensive to undo.
-9. **Time is short (deadline 2am).** Tick TASKS.md in batches, not per task. Commit per phase. Hand-test once per phase, not per task. No spoken progress updates while building.
+9. **Time is short (deadline 2am).** Tick TASKS.md in batches, not per task. Commit often (rule 4). Hand-test once per phase, not per task. No spoken progress updates while building.
 10. Barnaby's voice is a British male voice from Phonon's catalog (`Toby` by default; `Master Aldric` and `Sir Bramwell` suit the old-gentleman character). The product speaks for agents; the build process does not need to.
 
 ## Rules
