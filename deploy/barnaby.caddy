@@ -1,0 +1,5 @@
+barnaby.valfred.world {
+    root * /var/www/barnaby
+    file_server
+    encode gzip
+}

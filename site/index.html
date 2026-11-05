@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Barnaby, a desktop pet who reads your code</title>
+<meta name="description" content="A desktop pet who reads your code out loud and walks you through it.">
+<link rel="icon" href="icon.png">
+<style>
+:root{--bg:#14130f;--panel:#1d1b15;--line:#3a3322;--text:#ece6d4;--dim:#a79f88;--brass:#c9a24a;--brass2:#e6c677;--cyan:#5fd6e6}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;background:var(--bg);color:var(--text);font:17px/1.6 Georgia,"Times New Roman",serif}
+.wrap{max-width:960px;margin:0 auto;padding:0 20px}
+h1,h2,h3{font-weight:normal;color:var(--brass2);line-height:1.2}
+h2{font-size:1.9rem;margin:0 0 .6rem;border-bottom:1px solid var(--line);padding-bottom:.4rem}
+section{padding:56px 0}
+a{color:var(--brass2)}
+.px{image-rendering:pixelated;image-rendering:crisp-edges}
+.hero{display:flex;gap:40px;align-items:center;padding:64px 0 40px;flex-wrap:wrap}
+.hero .art{flex:0 0 auto;width:210px;margin:0 auto}
+.hero .art img{width:100%;height:auto;display:block;filter:drop-shadow(0 8px 0 #0008)}
+.hero h1{font-size:3.2rem;margin:0}
+.tag{font-size:1.35rem;color:var(--text);margin:.5rem 0 1.4rem}
+.btn{display:inline-block;padding:.65rem 1.3rem;border:2px solid var(--brass);color:var(--brass2);text-decoration:none;font-family:monospace;letter-spacing:.04em;margin:0 .6rem .6rem 0}
+.btn:hover,.btn:focus{background:var(--brass);color:#14130f}
+.video{position:relative;aspect-ratio:16/9;background:#000;border:2px solid var(--brass)}
+.video iframe{position:absolute;inset:0;width:100%;height:100%;border:0}
+.video .ph{position:absolute;inset:0;display:flex;align-items:center;justify-content:center;text-align:center;color:var(--dim);padding:20px;font-family:monospace}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:18px}
+.card{background:var(--panel);border:1px solid var(--line);border-top:3px solid var(--brass);padding:18px}
+.card h3{margin:0 0 .4rem;font-size:1.25rem}
+.card p{margin:0;color:var(--dim)}
+ol.steps{padding-left:1.2rem}
+ol.steps li{margin:.5rem 0}
+code{font-family:monospace;color:var(--cyan)}
+.tags{display:flex;flex-wrap:wrap;gap:10px;padding:0;list-style:none}
+.tags li{border:1px solid var(--line);background:var(--panel);padding:.35rem .8rem;font-family:monospace;font-size:.9rem}
+footer{border-top:1px solid var(--line);padding:28px 0 48px;color:var(--dim);font-size:.9rem}
+@media (max-width:560px){.hero h1{font-size:2.4rem}body{font-size:16px}}
+</style>
+</head>
+<body>
+<main class="wrap">
+
+<header class="hero">
+  <div class="art"><img class="px" src="barnaby.svg" alt="Barnaby, a pixel-art old British gentleman with a top hat and a cyan monocle" width="210" height="289"></div>
+  <div>
+    <h1>Barnaby</h1>
+    <p class="tag">A desktop pet who reads your code out loud and walks you through it.</p>
+    <a class="btn" href="#demo">WATCH THE DEMO</a>
+    <a class="btn" href="https://github.com/Vachilla64/barnaby">GITHUB</a>
+  </div>
+</header>
+
+<section id="demo">
+  <h2>Demo</h2>
+  <div class="video" id="video">
+    <div class="ph" id="ph">Demo video coming soon.</div>
+  </div>
+</section>
+
+<section id="features">
+  <h2>What he does</h2>
+  <div class="grid">
+    <div class="card"><h3>Ask by voice or text</h3><p>Click Barnaby and type a question, or hold the push-to-talk key and speak. He reads the project and answers out loud in a British voice.</p></div>
+    <div class="card"><h3>Guided tours in VS Code</h3><p>Say "show me" and he walks you through the files. He always says where to look in words. If you allow it, he also opens the file and highlights the lines.</p></div>
+    <div class="card"><h3>Watches your coding agents</h3><p>Through Claude Code hooks and MCP tools, he tells you when an agent has finished, so you can look away from the terminal.</p></div>
+  </div>
+</section>
+
+<section id="how">
+  <h2>How it works</h2>
+  <ol class="steps">
+    <li>You pick a project folder. Barnaby can only read that folder.</li>
+    <li>You ask a question, typed or spoken.</li>
+    <li>Meta's Muse Spark model reads the files it needs and writes the answer, plus a list of tour steps.</li>
+    <li>Phonon, a voice engine on your own computer, speaks the answer in Barnaby's voice.</li>
+    <li>The VS Code extension opens each file and highlights the lines, if tour navigation is switched on.</li>
+  </ol>
+  <p>Barnaby is a small always-on-top pixel pet. Pick him up and he panics. Drop him and he falls and bounces. During a tour he turns his back and points.</p>
+</section>
+
+<section id="privacy">
+  <h2>Privacy</h2>
+  <ul>
+    <li>Only the project folder you choose is read.</li>
+    <li>Only your question and the code needed to answer it go to Meta's API.</li>
+    <li>Window titles and anything outside that folder are never sent.</li>
+    <li>The local server listens on <code>127.0.0.1</code> only and checks a token.</li>
+    <li>Your API key is kept in Windows Credential Manager.</li>
+    <li>The voice runs on your own computer.</li>
+  </ul>
+</section>
+
+<section id="built">
+  <h2>Built with</h2>
+  <ul class="tags">
+    <li>Meta Model API</li><li>Muse Spark</li><li>Phonon TTS</li><li>Tauri 2</li><li>Rust</li><li>TypeScript</li><li>Vite</li><li>VS Code extension</li><li>Claude Code hooks</li><li>MCP</li>
+  </ul>
+</section>
+
+</main>
+<footer><div class="wrap">Made for the Meta Global AI Developer Hackathon. Windows only. <a href="https://github.com/Vachilla64/barnaby">Source on GitHub</a>.</div></footer>
+
+<script>
+// Paste the YouTube video id here. Leave empty to show the placeholder.
+var VIDEO_ID = "";
+if (VIDEO_ID) {
+  var f = document.createElement("iframe");
+  f.src = "https://www.youtube.com/embed/" + VIDEO_ID;
+  f.title = "Barnaby demo video";
+  f.allow = "accelerometer; encrypted-media; picture-in-picture";
+  f.allowFullscreen = true;
+  document.getElementById("video").replaceChildren(f);
+}
+</script>
+</body>
+</html>
