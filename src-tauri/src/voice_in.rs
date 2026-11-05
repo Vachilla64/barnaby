@@ -134,6 +134,7 @@ fn emit(state: &ServerState, event: &str, payload: Value) {
 pub async fn run_command(state: &Arc<ServerState>, command: Command) {
     match command {
         Command::Tour(Control::Stop) => {
+            crate::look::set(state, false, "cancelled");
             state.tours.control(Control::Stop).await;
             if let Some(q) = &state.speech_queue {
                 q.stop_speech().await;

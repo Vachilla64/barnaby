@@ -1,7 +1,7 @@
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { listen } from "@tauri-apps/api/event";
 import { invoke } from "@tauri-apps/api/core";
-import { AppConfig, PetState, PhononStatusInfo } from "./types";
+import { AfterSelect, AppConfig, PetState, PhononStatusInfo, SetupStatus, TourPace } from "./types";
 import { PetComponent } from "./pet";
 import { SpeechBubbleComponent } from "./bubble";
 import { PetMenuManager } from "./menu";
@@ -10,8 +10,20 @@ import { PetDragManager } from "./drag";
 import { floorTop } from "./physics";
 import { initRegionWatcher, updateClickRegions } from "./regions";
 import { initSettingsView } from "./settings";
-import { PushToTalk } from "./ptt";
+import { PushToTalk, Recording } from "./ptt";
 import { toBase64 } from "./wav";
+import { ChatChip, ChatPanel } from "./chat";
+import { LookController } from "./look";
+import { SetupCard } from "./setup";
+import { TourCard, TourStepInfo } from "./tour";
+
+/** What the buttons under "What would you like to know about it?" ask. */
+const ABOUT_SELECTION: { label: string; question: string }[] = [
+  { label: "Explain it", question: "Explain the code I have selected: what it does and how it fits into the rest of the project." },
+  { label: "Why is it here?", question: "Why does the code I have selected exist? What problem does it solve?" },
+  { label: "Where is it used?", question: "Show me where the code I have selected is used or called from." },
+  { label: "What could break?", question: "What could break if I change the code I have selected?" },
+];
 
 async function main() {
   const currentWindow = getCurrentWebviewWindow();
@@ -59,16 +71,19 @@ async function main() {
   const pet = new PetComponent(agentKind, petColor, initialX, initialY);
   const bubble = new SpeechBubbleComponent();
   const menuManager = new PetMenuManager();
+  menuManager.setMuted(!config.voice.enabled);
   const feedManager = new ActivityFeedManager();
   const dragManager = new PetDragManager(pet);
+  const chat = new ChatPanel();
 
   // Mount to DOM
   appEl.appendChild(pet.element);
   pet.setPosition(initialX, initialY); // sets which way he faces when guiding
   appEl.appendChild(bubble.element);
-  appEl.appendChild(menuManager.leftMenuEl);
-  appEl.appendChild(menuManager.rightMenuEl);
+  appEl.appendChild(chat.element);
+  appEl.appendChild(menuManager.el);
   appEl.appendChild(feedManager.element);
+  const look = new LookController(pet, appEl);
 
   // Helper to sync companion elements with pet position
   const syncPositions = (x: number, y: number) => {
@@ -76,11 +91,9 @@ async function main() {
     bubble.element.style.left = `${x + 36}px`;
     bubble.element.style.top = `${y}px`;
 
-    // If menus are open, update them
-    if (!menuManager.leftMenuEl.classList.contains("hidden")) {
-      menuManager.leftMenuEl.style.left = `${x}px`;
-      menuManager.leftMenuEl.style.top = `${Math.max(10, y - 140)}px`;
-    }
+    // The conversation stands beside him, and the pet menu opens above him
+    chat.reposition(x, y, pet.element.offsetWidth || 96, pet.element.offsetHeight || petHeight);
+    menuManager.reposition(x, y);
   };
 
   syncPositions(initialX, initialY);
@@ -92,17 +105,22 @@ async function main() {
     feedManager.onPetMouseLeave();
   });
 
-  dragManager.onClick(() => {
-    // Left-click on pet: toggle pet menu
+  dragManager.onClick((e) => {
+    // His monocle starts look mode; the rest of him opens the menu.
+    if (look.isOnMonocle(e.clientX, e.clientY)) {
+      void toggleLook();
+      return;
+    }
     const pos = pet.getPosition();
-    menuManager.showLeftMenu(pos.x, Math.max(10, pos.y - 140));
+    menuManager.showMenu(pos.x, pos.y);
   });
 
-  // Right-click on pet: context menu
+  // Right-click on pet opens the same menu
   pet.element.addEventListener("contextmenu", (e) => {
     e.preventDefault();
     e.stopPropagation();
-    menuManager.showRightMenu(e.clientX, e.clientY);
+    const pos = pet.getPosition();
+    menuManager.showMenu(pos.x, pos.y);
   });
 
   // Pet Hover for Activity Feed (1s delay per SPEC 5.1)
@@ -124,54 +142,242 @@ async function main() {
     }
   };
 
-  const muteVoice = async () => {
+  const setVoiceMuted = async (muted: boolean) => {
     try {
-      await invoke("set_voice_enabled", { enabled: false });
-      bubble.show("Voice notifications muted.", [], 2500);
-      feedManager.addItem("Voice muted");
+      await invoke("set_voice_enabled", { enabled: !muted });
+      menuManager.setMuted(muted);
+      bubble.show(muted ? "Voice notifications muted." : "Voice is back on.", [], 2500);
+      feedManager.addItem(muted ? "Voice muted" : "Voice unmuted");
     } catch (e) {
-      console.error("Failed to mute voice:", e);
+      console.error("Failed to change voice mute:", e);
     }
+  };
+  // The Mute tile toggles; the "mute" voice command only ever mutes.
+  const muteVoice = () => setVoiceMuted(true);
+
+  // --- Asking and the conversation ---
+
+  /** Send a question. The backend echoes it as `chat:user`, which puts it on the list. */
+  const ask = (question: string, shown?: string) => {
+    pet.setState("thinking");
+    invoke("ask_question", { question, shown: shown ?? null }).catch((e) => {
+      console.error("ask_question failed:", e);
+      chat.setThinking(false);
+      chat.addError("I couldn't ask just now.");
+      pet.setState("idle");
+    });
+  };
+
+  // --- Voice in: push-to-talk, and listening by the microphone button ---
+  const ptt = new PushToTalk();
+
+  const sendRecording = async (recording: Recording | null) => {
+    chat.setListening(false);
+    if (!recording) {
+      bubble.hide();
+      pet.setState("idle");
+      return;
+    }
+    bubble.show("One moment...", [], 0);
+    try {
+      await invoke("ptt_audio", { wavBase64: toBase64(recording.wav) });
+    } catch (e) {
+      console.error("ptt_audio failed:", e);
+      bubble.show("I didn't catch that.", [], 3000);
+      pet.setState("idle");
+    }
+  };
+
+  /** Hands-free: record until the person has spoken and gone quiet. Pressing the button again stops it. */
+  const listenOnce = async () => {
+    if (ptt.isRecording()) {
+      const recording = ptt.stop();
+      if (!recording) chat.addNote("I did not hear anything.");
+      await sendRecording(recording);
+      return;
+    }
+    chat.open();
+    chat.setListening(true);
+    bubble.hide();
+    pet.setState("thinking");
+    try {
+      await ptt.start({
+        silenceMs: 1200,
+        noSpeechMs: 8000,
+        maxMs: 25000,
+        onDone: () => {
+          const recording = ptt.stop();
+          if (!recording) chat.addNote("I did not hear anything.");
+          void sendRecording(recording);
+        },
+      });
+    } catch (e) {
+      console.error("Microphone unavailable:", e);
+      chat.setListening(false);
+      chat.addError("I can't use the microphone. Check the Windows microphone permission.");
+      pet.setState("idle");
+    }
+  };
+
+  chat.setCallbacks({
+    onSend: (text) => ask(text),
+    onMic: () => void listenOnce(),
+    onNewChat: () => void invoke("reset_conversation"),
+    onSetup: () => showSetup(),
+    onStop: () => {
+      invoke("stop_speech").catch(console.error);
+      chat.setSpeaking(false);
+      pet.setState("idle");
+    },
+  });
+
+  // --- First-run guide ---
+  let setupCard: SetupCard | null = null;
+  const showSetup = () => {
+    chat.open();
+    if (setupCard?.element.isConnected) return;
+    setupCard = new SetupCard({
+      onReady: () => {
+        invoke("say_text", {
+          text: "Splendid. That is everything. Click my monocle, select some code in VS Code, and I shall take a look.",
+        }).catch(console.error);
+      },
+      onLeave: () => {
+        setupCard?.element.remove();
+        setupCard = null;
+        chat.unpin();
+        invoke("finish_onboarding").catch(console.error);
+        updateClickRegions();
+      },
+      openSettings: () => void invoke("open_settings"),
+    });
+    chat.addElement(setupCard.element, true);
   };
 
   // Menu Callbacks
   menuManager.setCallbacks({
-    onAsk: (question) => {
-      pet.setState("thinking");
-      bubble.show(`Thinking about: "${question}"...`, [
-        {
-          id: "stop",
-          label: "Stop",
-          onClick: async () => {
-            await invoke("stop_speech");
-            bubble.hide();
-            pet.setState("idle");
-          },
-        },
-      ], 60000);
-      feedManager.addItem(`Asked: "${question}"`);
-      invoke("ask_question", { question }).catch((e) => {
-        console.error("ask_question failed:", e);
-        bubble.show("I couldn't ask just now.", [], 3000);
-        pet.setState("idle");
-      });
-    },
+    onChat: () => chat.open(true),
     onRepeat: () => repeatLast(),
-    onMute: () => void muteVoice(),
+    onMute: () => void setVoiceMuted(!menuManager.isMuted()),
+  });
+
+  // --- Backend events: the conversation ---
+  await listen<{ text: string }>("chat:user", (event) => {
+    bubble.hide();
+    chat.open();
+    chat.addUser(event.payload.text);
+    chat.setThinking(true);
+    pet.setState("thinking");
+    feedManager.addItem(`Asked: "${event.payload.text}"`);
+  });
+
+  const followUps = (): ChatChip[] => [
+    { label: "Tell me more", onClick: () => ask("Tell me more about that.", "Tell me more") },
+    { label: "Why?", onClick: () => ask("Why is it done that way?", "Why?") },
+  ];
+
+  await listen<{ speech: string; agenda: string[]; tour_started: boolean }>("chat:answer", (event) => {
+    const a = event.payload;
+    chat.setThinking(false);
+    const chips: ChatChip[] = [];
+    if (a.agenda.length > 0 && !a.tour_started) {
+      chips.push({
+        label: a.agenda.length === 1 ? "Show me" : `Show me (${a.agenda.length} stops)`,
+        onClick: () => {
+          chat.addUser("Show me");
+          invoke("accept_tour").catch(console.error);
+        },
+      });
+    }
+    chips.push(...followUps());
+    // When the walk starts by itself the card takes over, so the map is not drawn twice.
+    chat.addBarnaby(a.speech, chips, a.tour_started ? [] : a.agenda);
+  });
+
+  await listen<{ text: string }>("chat:error", (event) => {
+    chat.setThinking(false);
+    chat.open();
+    chat.addError(event.payload.text);
+  });
+
+  await listen("chat:reset", () => {
+    chat.clear();
+    chat.addBarnaby("A fresh start. What shall we look at?");
+  });
+
+  // --- Backend events: look mode ---
+  const toggleLook = async () => {
+    try {
+      await look.toggle();
+    } catch (e) {
+      if (String(e) === "vscode") {
+        chat.addBarnaby("I cannot see VS Code yet, so I have nothing to look at. Let us link it first.");
+        showSetup();
+      } else {
+        console.error("set_look_mode failed:", e);
+      }
+    }
+  };
+
+  await listen<{ on: boolean; reason?: string }>("look:state", (event) => {
+    const { on, reason } = event.payload;
+    look.setOn(on, reason);
+    if (on) {
+      bubble.show("Select some code in VS Code and I shall take a look. Click my monocle again to cancel.", [], 7000);
+    } else if (reason === "timeout") {
+      bubble.show("No code today? Another time, then.", [], 3500);
+    } else if (reason === "disconnected") {
+      bubble.show("VS Code has gone. Nothing to look at.", [], 3500);
+    } else {
+      bubble.hide();
+    }
+  });
+
+  await listen<{ x: number; y: number }>("look:cursor", (event) => look.moveRing(event.payload.x, event.payload.y));
+
+  await listen<{ name: string; start_line: number; end_line: number; after: AfterSelect }>("look:selected", (event) => {
+    const { name, start_line, end_line, after } = event.payload;
+    bubble.hide();
+    chat.open();
+    chat.addNote(start_line === end_line ? `${name}, line ${start_line}` : `${name}, lines ${start_line} to ${end_line}`);
+    pet.setState("happy");
+    setTimeout(() => {
+      if (pet.state === "happy") pet.setState("idle");
+    }, 1200);
+
+    if (after === "explain") {
+      ask(ABOUT_SELECTION[0].question, ABOUT_SELECTION[0].label);
+    } else if (after === "listen") {
+      chat.addBarnaby("I am listening. What would you like to know about it?");
+      void listenOnce();
+    } else {
+      chat.addBarnaby(
+        "What would you like to know about it?",
+        ABOUT_SELECTION.map((s) => ({ label: s.label, onClick: () => ask(s.question, s.label) })),
+      );
+      invoke("say_text", { text: "I see it. What would you like to know?" }).catch(console.error);
+    }
   });
 
   // 4. Listen for backend speech events (P2 Voice Out)
   let tourActive = false;
 
-  await listen<{ agent_id: string; sentence: string }>("speech:start", (event) => {
-    const { sentence } = event.payload;
+  await listen<{ agent_id: string; sentence: string; kind?: string }>("speech:start", (event) => {
+    const { sentence, agent_id, kind } = event.payload;
     if (!sentence) return;
+    chat.touch();
     if (tourActive) {
       pet.setState("guiding");
       return; // the tour bubble already shows this narration with its Back/Next/Stop buttons
     }
 
     pet.setState("talking");
+    feedManager.addItem(sentence);
+    // His own answers are on the conversation list already; only other speech gets a bubble.
+    if (agent_id === "barnaby" && (kind === "answer" || chat.isOpen())) {
+      chat.setSpeaking(true);
+      return;
+    }
     bubble.show(sentence, [
       {
         id: "stop",
@@ -183,13 +389,13 @@ async function main() {
         },
       },
     ], 15000);
-    feedManager.addItem(sentence);
   });
 
   await listen<{ agent_id: string }>("speech:end", () => {
     if (pet.state === "talking") {
       pet.setState("idle");
     }
+    chat.setSpeaking(false);
     if (tourActive) return;
     setTimeout(() => {
       if (pet.state !== "talking" && !tourActive) {
@@ -198,58 +404,58 @@ async function main() {
     }, 1500);
   });
 
-  // Tours (P5): the bubble shows each step with Back / Next / Stop
+  // Tours: a card in the conversation shows the plan, where he is in it, and Back / Next / Stop.
+  // He speaks each stop; the words are written out only when his voice is off.
   const tourControl = (action: string) => invoke("tour_control", { action }).catch(console.error);
+  let tourCard: TourCard | null = null;
 
-  await listen<{
-    index: number;
-    total: number;
-    path: string;
-    start_line: number;
-    narration: string;
-    vscode: boolean;
-  }>("tour:step", (event) => {
+  const voiceIsOn = async (): Promise<boolean> => {
+    if (menuManager.isMuted()) return false;
+    try {
+      return (await invoke<PhononStatusInfo>("get_phonon_status")).state === "ready";
+    } catch {
+      return false;
+    }
+  };
+
+  await listen<{ labels: string[]; pace: TourPace }>("tour:start", (event) => {
+    const { labels, pace } = event.payload;
+    tourActive = true;
+    bubble.hide();
+    tourCard = new TourCard(labels, pace, tourControl);
+    const card = tourCard;
+    void voiceIsOn().then((on) => card.setShowWords(!on));
+    chat.open();
+    chat.setFocus(true);
+    chat.addElement(card.element, true);
+  });
+
+  await listen<TourStepInfo>("tour:step", (event) => {
     const t = event.payload;
     tourActive = true;
     pet.setState("guiding"); // turns his back and gestures at the screen
-    const shortPath = t.path.split(/[\\/]/).slice(-2).join("/");
-    const where = t.vscode ? "" : `${shortPath}:${t.start_line} - `;
-    bubble.show(
-      `${t.index + 1}/${t.total}  ${where}${t.narration}`,
-      [
-        { id: "back", label: "Back", onClick: () => tourControl("back") },
-        { id: "next", label: "Next", onClick: () => tourControl("next") },
-        { id: "stop", label: "Stop", onClick: () => tourControl("stop") },
-      ],
-      0,
-    );
-    feedManager.addItem(`Tour ${t.index + 1}/${t.total}: ${t.narration}`);
+    tourCard?.setStep(t);
+    chat.touch();
+    feedManager.addItem(`Tour ${t.index + 1}/${t.total}: ${t.title}`);
   });
 
-  await listen("tour:end", () => {
+  // His turn is over and it is yours: bring the card back if you tucked it away.
+  await listen("tour:waiting", () => {
+    chat.open();
+    tourCard?.setWaiting();
+  });
+
+  await listen<{ finished: boolean; recap: string }>("tour:end", (event) => {
+    const { finished, recap } = event.payload;
     tourActive = false;
     pet.setState("idle");
-    setTimeout(() => {
-      if (!tourActive) bubble.hide();
-    }, 2500);
-  });
-
-  await listen<{ steps: number }>("tour:offer", (event) => {
-    bubble.show(
-      `I can walk you through it in ${event.payload.steps} steps. Want me to show you?`,
-      [
-        {
-          id: "show",
-          label: "Show me",
-          onClick: () => {
-            bubble.hide();
-            invoke("accept_tour").catch(console.error);
-          },
-        },
-        { id: "no", label: "No thanks", onClick: () => bubble.hide() },
-      ],
-      30000,
-    );
+    tourCard?.finish(finished);
+    tourCard = null;
+    chat.unpin();
+    chat.setFocus(false);
+    if (finished && recap) chat.addBarnaby(`The thing to remember: ${recap}`, followUps());
+    else if (!finished) chat.addNote("Walk ended. Ask me anything else.");
+    else chat.setChips(followUps());
   });
 
   await listen<{ agent_id: string; text: string }>("speech:bubble", (event) => {
@@ -285,38 +491,26 @@ async function main() {
   });
 
   // Voice in (P6): hold the push-to-talk key to speak; release to send
-  const ptt = new PushToTalk();
   await listen("ptt:start", async () => {
+    chat.open();
+    chat.setListening(true);
+    bubble.hide();
     pet.setState("thinking");
-    bubble.show("Listening...", [], 0);
     try {
       await ptt.start();
     } catch (e) {
       console.error("Microphone unavailable:", e);
-      bubble.show("I can't use the microphone. Check Windows microphone permission.", [], 5000);
+      chat.setListening(false);
+      chat.addError("I can't use the microphone. Check the Windows microphone permission.");
       pet.setState("idle");
     }
   });
   await listen("ptt:stop", async () => {
-    const recording = ptt.stop();
-    if (!recording) {
-      bubble.hide();
-      pet.setState("idle");
-      return;
-    }
-    bubble.show("One moment...", [], 0);
-    try {
-      await invoke("ptt_audio", { wavBase64: toBase64(recording.wav) });
-    } catch (e) {
-      console.error("ptt_audio failed:", e);
-      bubble.show("I didn't catch that.", [], 3000);
-      pet.setState("idle");
-    }
+    await sendRecording(ptt.stop());
   });
   await listen("ptt:fallback", () => {
     pet.setState("idle");
-    const pos = pet.getPosition();
-    menuManager.showLeftMenu(pos.x, Math.max(10, pos.y - 140));
+    chat.open(true);
   });
   await listen("command:repeat", () => repeatLast());
   await listen("command:mute", () => void muteVoice());
@@ -327,10 +521,21 @@ async function main() {
   // Everything mounted and listening: now the backend may show the overlay window.
   await invoke("overlay_ready");
 
-  // Initial welcome greeting
-  setTimeout(() => {
-    bubble.show("Hi! I'm Barnaby. Drag me anywhere!", [], 5000);
+  // Welcome. A first run gets the setup guide; after that he just says what he can do.
+  setTimeout(async () => {
     feedManager.addItem("Barnaby started");
+    let firstRun = !config.onboarding_done;
+    try {
+      const status = await invoke<SetupStatus>("setup_status");
+      firstRun = !status.onboarding_done;
+    } catch (e) {
+      console.error("setup_status failed:", e);
+    }
+    if (firstRun) {
+      showSetup();
+    } else {
+      bubble.show("Good day! Click my monocle, select some code, and I shall take a look.", [], 6000);
+    }
     updateClickRegions();
   }, 300);
 

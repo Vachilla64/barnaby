@@ -4,7 +4,7 @@ use std::sync::{
     Arc, Mutex,
 };
 use std::time::Duration;
-use tauri::WebviewWindow;
+use tauri::{Emitter, WebviewWindow};
 use windows::Win32::Foundation::{HWND, POINT};
 use windows::Win32::Graphics::Gdi::ScreenToClient;
 use windows::Win32::UI::WindowsAndMessaging::{
@@ -121,11 +121,31 @@ impl ClickthroughManager {
                 raw_hwnd
             );
 
+            // Look mode: the page draws a monocle ring on the cursor, so tell it where the cursor is.
+            let mut last_look: Option<(i32, i32)> = None;
+            let mut last_look_sent = std::time::Instant::now();
+
             while gen_tracker.load(Ordering::SeqCst) == current_gen {
                 let mut pt = POINT::default();
                 let success = unsafe { GetCursorPos(&mut pt).is_ok() };
 
                 if success {
+                    if crate::look::is_on() {
+                        let mut at = pt;
+                        if let Some(h) = raw_hwnd {
+                            unsafe {
+                                let _ = ScreenToClient(h, &mut at);
+                            }
+                        }
+                        if last_look != Some((at.x, at.y)) && last_look_sent.elapsed() >= Duration::from_millis(14) {
+                            last_look = Some((at.x, at.y));
+                            last_look_sent = std::time::Instant::now();
+                            let _ = window.emit("look:cursor", serde_json::json!({"x": at.x, "y": at.y}));
+                        }
+                    } else {
+                        last_look = None;
+                    }
+
                     let dragging = dragging_ref.load(Ordering::SeqCst);
                     let mut inside = dragging;
 

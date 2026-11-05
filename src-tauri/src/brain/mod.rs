@@ -21,20 +21,120 @@ const KEYRING_USER: &str = "meta-api-key";
 /// The voice and pet name used when the brain speaks.
 const BRAIN_KIND: &str = "barnaby";
 
-const SYSTEM_PROMPT: &str = "You are Barnaby, a friendly guide who explains a codebase to the person who owns it. \
-They may not have written most of it. Answer in plain spoken English, as if talking next to them: short sentences, \
-no markdown, no code read aloud, file names said simply (\"the validate file in auth\"). Only state what the code shows; \
-read files when unsure. When the answer lives in specific places, return a tour: an ordered walk through the files, \
-each step with a narration of one to three sentences that says what this piece does and how it connects to the next.\n\n\
+/// How he talks. It is built on what is known about teaching: give the answer and a map first, then
+/// small steps the learner can hold in mind (about four), one idea each, in plain words; do not
+/// read the screen aloud; finish with the one thing to remember.
+const SYSTEM_PROMPT: &str = "You are Sir Barnaby, a kind old English gentleman who helps the owner of a codebase understand it. \
+If you ever introduce yourself, say you are Sir Barnaby.\n\n\
+WHO YOU ARE TALKING TO\n\
+Assume the owner is clever but has not read this code and may be new to programming. Your words are SPOKEN aloud, so write for the ear.\n\n\
+PLAIN ENGLISH\n\
+- Short sentences, about 15 words, one idea each. Everyday words. Active voice.\n\
+- Say what a thing is FOR before how it works. Purpose first, detail second.\n\
+- Never leave jargon unexplained. If a technical word is needed, say what it means in the same breath (\"a route, which is a web address the server answers\").\n\
+- Do not read code aloud: no symbols, no line numbers, no long names. Call things by their job (\"the part that checks the password\"). You may say a file or function name once, simply, so they can find it.\n\
+- Only state what the code shows. Read files when unsure. If you are not sure, say so.\n\n\
+THE ANSWER\n\
+- speech: the answer comes first, in the very first sentence. If you return a tour, end speech with the map: say how many stops there are and name them in order, in the same words as the step titles but written in lower case inside the sentence (\"I will show you three things: where the form is built, where the password is checked, and where the result goes.\"). In all, at most 4 sentences and about 60 words. Without a tour, 2 to 4 short sentences.\n\
+- tour: only when the answer lives in two or more places worth seeing. Otherwise leave it empty. Aim for 3 or 4 steps, never more than 5. Fewer, clearer steps beat many.\n\
+  - One idea per step. Order the steps as a story (what starts it, what happens, what comes out), not by file.\n\
+  - title: 2 to 5 plain words naming the step (\"Where the password is checked\").\n\
+  - narration: one or two short sentences, about 30 words at most. Say what this piece does and why it matters or what it hands on to the next piece. When the file changes, say so in plain words (\"Over in the login file, ...\"). Never repeat an earlier step. Never describe code line by line.\n\
+  - Highlight only the lines you talk about: 15 lines at most per step, with real line numbers from the files.\n\
+- recap: one plain sentence stating the single idea to take away (do not begin it with \"Remember\"). Empty when there is no tour.\n\
+- If the user has selected code, explain that selection first and say which file it is in; then say briefly how it connects to the rest of the project.\n\
+- Earlier questions and answers come before the new question. For follow-ups such as \"why?\" or \"and where is that called?\", answer just that, briefly, and do not give the overview again.\n\n\
 Reply with ONLY a JSON object, no other text, in this shape:\n\
-{\"speech\": \"2-4 spoken sentences, no code, no markdown\", \"tour\": [{\"path\": \"relative/path.ext\", \"start_line\": 1, \"end_line\": 10, \"narration\": \"one to three sentences\"}]}\n\
-\"tour\" may be an empty list. Use at most 12 steps and real line numbers from the files.";
+{\"speech\": \"...\", \"tour\": [{\"path\": \"relative/path.ext\", \"start_line\": 1, \"end_line\": 10, \"title\": \"...\", \"narration\": \"...\"}], \"recap\": \"...\"}\n\
+\"tour\" may be an empty list.";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Answer {
     pub speech: String,
     #[serde(default)]
     pub tour: Vec<TourStep>,
+    #[serde(default)]
+    pub recap: String,
+}
+
+/// One question and the answer he gave (what he said and the stops he offered), kept so a follow-up
+/// such as "tell me more about the second one" can refer back to it.
+#[derive(Debug, Clone, PartialEq)]
+pub struct Turn {
+    pub question: String,
+    pub speech: String,
+    pub tour: Vec<TourStep>,
+}
+
+/// The running conversation. It belongs to one project: asking about another starts afresh.
+#[derive(Debug, Default)]
+pub struct Conversation {
+    pub root: Option<PathBuf>,
+    pub turns: Vec<Turn>,
+}
+
+/// Older turns are dropped past this many, to keep requests small.
+const MAX_TURNS: usize = 8;
+
+impl Conversation {
+    /// The turns to send with a question about `root`. Switching project forgets the old ones.
+    pub fn history_for(&mut self, root: &Path) -> Vec<Turn> {
+        if self.root.as_deref() != Some(root) {
+            self.root = Some(root.to_path_buf());
+            self.turns.clear();
+        }
+        self.turns.clone()
+    }
+
+    pub fn record(&mut self, turn: Turn) {
+        self.turns.push(turn);
+        if self.turns.len() > MAX_TURNS {
+            self.turns.remove(0);
+        }
+    }
+
+    pub fn clear(&mut self) {
+        self.turns.clear();
+    }
+}
+
+fn norm_path(p: &str) -> String {
+    p.to_lowercase().replace('/', "\\")
+}
+
+/// A note about what the user has open in the editor, or None when it is not part of the project.
+/// Files outside the project folder are never described, so their code is never sent anywhere.
+pub fn editor_note(ed: &Value, root: &Path) -> Option<String> {
+    let path = ed.get("path")?.as_str().filter(|p| !p.is_empty())?;
+    let root_s = norm_path(&root.to_string_lossy());
+    let path_n = norm_path(path);
+    if !path_n.starts_with(&root_s) {
+        return None;
+    }
+    let rel = path.get(root_s.len()..).unwrap_or(path).trim_start_matches(['\\', '/']).replace('\\', "/");
+    let line = |k: &str| ed.get(k).and_then(Value::as_u64).unwrap_or(1);
+    let selected = ed.get("selection_text").and_then(Value::as_str).unwrap_or("").trim_end();
+    if selected.trim().is_empty() {
+        Some(format!("The user has {rel} open, with the cursor on line {}.", line("cursor_line")))
+    } else {
+        Some(format!(
+            "The user has selected lines {} to {} of {rel}:\n```\n{selected}\n```\n\
+When they say \"this\", \"it\", \"here\" or \"that code\", they mean this selection.",
+            line("start_line"),
+            line("end_line"),
+        ))
+    }
+}
+
+/// System prompt (with the project in it), then the earlier turns, then the new question.
+pub fn build_messages(system: String, history: &[Turn], user: String) -> Vec<Value> {
+    let mut messages = vec![json!({"role": "system", "content": system})];
+    for t in history {
+        messages.push(json!({"role": "user", "content": t.question}));
+        messages.push(json!({"role": "assistant", "content": json!({"speech": t.speech, "tour": t.tour}).to_string()}));
+    }
+    messages.push(json!({"role": "user", "content": user}));
+    messages
 }
 
 // ---------- API key ----------
@@ -225,37 +325,24 @@ pub async fn ask(
     root: &Path,
     question: &str,
     editor: Option<&Value>,
+    history: &[Turn],
 ) -> Result<Answer, String> {
     let root_buf = root.to_path_buf();
     let index = tokio::task::spawn_blocking(move || RepoIndex::build(&root_buf))
         .await
         .map_err(|e| e.to_string())?;
 
-    let mut context = format!("Project repo map:\n{}", index.repo_map());
+    // The project goes in the system message so it is the same for every turn of a conversation.
+    let mut system = format!("{SYSTEM_PROMPT}\n\nProject repo map:\n{}", index.repo_map());
     if let Some(full) = index.full_text() {
-        context.push_str(&format!("\nFull source:\n{full}"));
+        system.push_str(&format!("\n\nFull source:\n{full}"));
     }
-    let mut user = format!("{context}\n\nQuestion: {question}");
-    if let Some(ed) = editor {
-        let path = ed.get("path").and_then(Value::as_str).unwrap_or("");
-        if !path.is_empty() {
-            let selected = ed
-                .get("selection_text")
-                .and_then(Value::as_str)
-                .filter(|t| !t.is_empty())
-                .map(|t| format!(" Selected text:\n{t}"))
-                .unwrap_or_default();
-            user.push_str(&format!(
-                "\n\nThe user has {path} open at line {}.{selected}",
-                ed.get("cursor_line").and_then(Value::as_u64).unwrap_or(1),
-            ));
-        }
+    let mut user = format!("Question: {question}");
+    if let Some(note) = editor.and_then(|ed| editor_note(ed, root)) {
+        user.push_str(&format!("\n\n{note}"));
     }
 
-    let mut messages = vec![
-        json!({"role": "system", "content": SYSTEM_PROMPT}),
-        json!({"role": "user", "content": user}),
-    ];
+    let mut messages = build_messages(system, history, user);
     let mut retried = false;
 
     for round in 0..=MAX_TOOL_ROUNDS {
@@ -326,13 +413,35 @@ pub fn open_settings_window(state: &ServerState) {
     }
 }
 
+/// Tell the chat list something (a question, an answer, an error).
+fn chat_emit(state: &ServerState, event: &str, payload: Value) {
+    if let Some(app) = &state.app_handle {
+        use tauri::Emitter;
+        let _ = app.emit(event, payload);
+    }
+}
+
+/// Forget the conversation so far; the next question starts afresh.
+pub fn reset_conversation(state: &ServerState) {
+    state.conversation.lock().unwrap().clear();
+    chat_emit(state, "chat:reset", json!({}));
+}
+
 pub async fn speak_error(state: &ServerState, text: &str) {
+    chat_emit(state, "chat:error", json!({"text": text}));
     emit_agent_state(state, BRAIN_KIND, "alert", Some(text));
     speak(state, BRAIN_KIND, text, Priority::High, SpeechKind::Alert).await;
 }
 
-/// Answer `question` out loud, then offer or start a tour. Used by the Ask box, VS Code and REST.
+/// Answer `question` out loud, then offer or start a tour. Used by the chat box, VS Code and REST.
 pub async fn ask_and_present(state: Arc<ServerState>, question: String) -> Option<Answer> {
+    ask_and_present_as(state, question, None).await
+}
+
+/// Like `ask_and_present`, but the chat list shows `shown` as the user's message (for example the
+/// label of a button) while the model gets the full `question`.
+pub async fn ask_and_present_as(state: Arc<ServerState>, question: String, shown: Option<String>) -> Option<Answer> {
+    chat_emit(&state, "chat:user", json!({"text": shown.unwrap_or_else(|| question.clone())}));
     let cfg = crate::config::load_or_create_config().ok()?;
     let key = match key_for(&cfg.brain) {
         Ok(k) => k,
@@ -349,30 +458,37 @@ pub async fn ask_and_present(state: Arc<ServerState>, question: String) -> Optio
 
     emit_agent_state(&state, BRAIN_KIND, "thinking", Some(&format!("Asked: {question}")));
     let editor = state.hub.editor_context();
-    match ask(&cfg.brain, &key, &root, &question, editor.as_ref()).await {
+    let history = state.conversation.lock().unwrap().history_for(&root);
+    match ask(&cfg.brain, &key, &root, &question, editor.as_ref(), &history).await {
         Ok(answer) => {
+            state
+                .conversation
+                .lock()
+                .unwrap()
+                .record(Turn { question: question.clone(), speech: answer.speech.clone(), tour: answer.tour.clone() });
+
+            let mut roots = state.hub.workspace_folders();
+            roots.push(root.to_string_lossy().to_string());
+            let steps = crate::tours::validate_steps(answer.tour.clone(), &roots);
+            let tour_now = !steps.is_empty() && wants_tour(&question);
+            let tour_offered = !steps.is_empty() && !tour_now;
+            let agenda: Vec<String> = steps.iter().map(TourStep::label).collect();
+
+            // The chat list shows the full answer and the map of what comes next; the voice reads
+            // the answer out.
+            chat_emit(
+                &state,
+                "chat:answer",
+                json!({"speech": answer.speech, "agenda": agenda, "tour_started": tour_now}),
+            );
             emit_agent_state(&state, BRAIN_KIND, "talking", None);
             speak(&state, BRAIN_KIND, &answer.speech, Priority::High, SpeechKind::Answer).await;
-            if !answer.tour.is_empty() {
-                let colour = crate::server::pet_colour(BRAIN_KIND);
-                if wants_tour(&question) {
-                    let mut roots = state.hub.workspace_folders();
-                    roots.push(root.to_string_lossy().to_string());
-                    let steps = crate::tours::validate_steps(answer.tour.clone(), &roots);
-                    state.tours.start(BRAIN_KIND, "Tour", steps, colour).await;
-                } else {
-                    let mut roots = state.hub.workspace_folders();
-                    roots.push(root.to_string_lossy().to_string());
-                    let steps = crate::tours::validate_steps(answer.tour.clone(), &roots);
-                    if !steps.is_empty() {
-                        let n = steps.len();
-                        state.tours.set_pending("Tour", steps);
-                        if let Some(app) = &state.app_handle {
-                            use tauri::Emitter;
-                            let _ = app.emit("tour:offer", json!({"steps": n}));
-                        }
-                    }
-                }
+
+            let tour = crate::tours::Tour { title: "Tour".into(), steps, recap: answer.recap.clone() };
+            if tour_now {
+                state.tours.start(BRAIN_KIND, tour, crate::server::pet_colour(BRAIN_KIND)).await;
+            } else if tour_offered {
+                state.tours.set_pending(tour);
             }
             Some(answer)
         }
@@ -384,16 +500,28 @@ pub async fn ask_and_present(state: Arc<ServerState>, question: String) -> Optio
     }
 }
 
-/// Settings "Test" button: one tiny request.
+/// Settings "Test" button: one tiny request, with an error a person can act on.
 pub async fn test_connection() -> Result<String, String> {
     let cfg = crate::config::load_or_create_config().map_err(|e| e.to_string())?;
-    let key = key_for(&cfg.brain).map_err(|_| "No key saved yet.".to_string())?;
-    let msg = chat(&cfg.brain, &key, &[json!({"role": "user", "content": "Reply with the word ok."})], false).await?;
-    Ok(format!(
-        "Connected to {} ({}).",
-        cfg.brain.base_url,
-        msg.get("content").and_then(Value::as_str).unwrap_or("").trim()
-    ))
+    let key = key_for(&cfg.brain).map_err(|_| "No key saved yet. Paste one above and press Save.".to_string())?;
+    match chat(&cfg.brain, &key, &[json!({"role": "user", "content": "Reply with the word ok."})], false).await {
+        Ok(msg) => {
+            let reply = msg.get("content").and_then(Value::as_str).unwrap_or("").trim().to_string();
+            Ok(if reply.is_empty() {
+                format!("Key works. {} answered.", cfg.brain.model)
+            } else {
+                format!("Key works. {} answered: {}", cfg.brain.model, reply.chars().take(40).collect::<String>())
+            })
+        }
+        Err(e) if e.contains("401") || e.contains("403") => Err(
+            "The API rejected this key. Copy the whole key again from dev.meta.ai, press Save, then Test.".into(),
+        ),
+        Err(e) if e.starts_with("request failed") => Err(format!(
+            "Could not reach {}. Check your internet connection. ({e})",
+            cfg.brain.base_url
+        )),
+        Err(e) => Err(e),
+    }
 }
 
 #[cfg(test)]
@@ -404,11 +532,72 @@ mod tests {
     fn parses_plain_fenced_and_chatty_json() {
         let plain = r#"{"speech":"Login is in auth.","tour":[]}"#;
         assert_eq!(parse_answer(plain).unwrap().speech, "Login is in auth.");
-        let fenced = "```json\n{\"speech\":\"Hi.\",\"tour\":[{\"path\":\"a.ts\",\"start_line\":1,\"end_line\":2,\"narration\":\"n\"}]}\n```";
-        assert_eq!(parse_answer(fenced).unwrap().tour.len(), 1);
+        let fenced = "```json\n{\"speech\":\"Hi.\",\"tour\":[{\"path\":\"a.ts\",\"start_line\":1,\"end_line\":2,\"title\":\"The start\",\"narration\":\"n\"}],\"recap\":\"It starts here.\"}\n```";
+        let parsed = parse_answer(fenced).unwrap();
+        assert_eq!(parsed.tour.len(), 1);
+        assert_eq!(parsed.tour[0].title, "The start");
+        assert_eq!(parsed.recap, "It starts here.");
+        // The title and the recap are optional: an older reply shape still works.
+        assert_eq!(parse_answer(plain).unwrap().recap, "");
         assert!(parse_answer("Sure! {\"speech\":\"x\"} done").is_ok());
         assert!(parse_answer("no json here").is_err());
         assert!(parse_answer("{\"speech\":\"\"}").is_err());
+    }
+
+    #[test]
+    fn editor_note_describes_a_selection_inside_the_project_only() {
+        let root = Path::new("C:\\code\\app");
+        let selected = json!({
+            "path": "C:\\code\\app\\src\\auth\\validate.ts", "selection_text": "if (!ok) throw e;\n",
+            "start_line": 12, "end_line": 13, "cursor_line": 13
+        });
+        let note = editor_note(&selected, root).unwrap();
+        assert!(note.contains("lines 12 to 13 of src/auth/validate.ts"));
+        assert!(note.contains("if (!ok) throw e;"));
+        assert!(note.contains("they mean this selection"));
+
+        let cursor_only = json!({"path": "c:/code/app/README.md", "selection_text": "", "cursor_line": 4});
+        assert_eq!(editor_note(&cursor_only, root).unwrap(), "The user has README.md open, with the cursor on line 4.");
+
+        // A file outside the project is never described, so its code is never sent.
+        let elsewhere = json!({"path": "C:\\other\\secret.ts", "selection_text": "password = 1"});
+        assert!(editor_note(&elsewhere, root).is_none());
+        assert!(editor_note(&json!({}), root).is_none());
+    }
+
+    #[test]
+    fn conversation_keeps_recent_turns_and_forgets_on_a_new_project() {
+        let mut conv = Conversation::default();
+        let a = Path::new("C:\\a");
+        assert!(conv.history_for(a).is_empty());
+        for i in 0..10 {
+            conv.record(Turn { question: format!("q{i}"), speech: format!("a{i}"), tour: vec![] });
+        }
+        let kept = conv.history_for(a);
+        assert_eq!(kept.len(), MAX_TURNS);
+        assert_eq!(kept[0].question, "q2");
+        assert!(conv.history_for(Path::new("C:\\b")).is_empty());
+    }
+
+    #[test]
+    fn messages_put_history_between_the_system_prompt_and_the_new_question() {
+        let stop = TourStep { path: "src/auth.ts".into(), start_line: 1, end_line: 5, title: "The check".into(), narration: "It checks.".into() };
+        let history = vec![Turn { question: "where is login?".into(), speech: "In auth.".into(), tour: vec![stop] }];
+        let msgs = build_messages("sys".into(), &history, "why?".into());
+        let roles: Vec<&str> = msgs.iter().map(|m| m["role"].as_str().unwrap()).collect();
+        assert_eq!(roles, ["system", "user", "assistant", "user"]);
+        assert!(msgs[2]["content"].as_str().unwrap().contains("In auth."));
+        // The stops he showed are remembered, so "tell me more about the second one" has something to mean.
+        assert!(msgs[2]["content"].as_str().unwrap().contains("The check"));
+        assert_eq!(msgs[3]["content"], "why?");
+    }
+
+    #[test]
+    fn the_prompt_asks_for_the_teaching_shape() {
+        // Plain English, answer and map first, few steps with titles, one thing to remember.
+        for needle in ["PLAIN ENGLISH", "never more than 5", "\"title\"", "recap", "Do not read code aloud", "do not give the overview again"] {
+            assert!(SYSTEM_PROMPT.contains(needle), "the prompt lost: {needle}");
+        }
     }
 
     #[test]

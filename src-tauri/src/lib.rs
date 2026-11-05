@@ -3,6 +3,7 @@ pub mod brain;
 pub mod config;
 pub mod connect;
 pub mod logging;
+pub mod look;
 pub mod mcp;
 pub mod overlay;
 pub mod server;
@@ -56,9 +57,12 @@ async fn ptt_audio(wav_base64: String, state: tauri::State<'_, Arc<server::Serve
 }
 
 static PTT_HELD: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+/// False when another program already owns the talk key, so Barnaby can say so.
+static PTT_REGISTERED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
 
-/// Hold the shortcut to talk. Pressing it also cuts any speech (barge-in).
-fn register_push_to_talk(app: &tauri::AppHandle, core: Arc<server::ServerState>, shortcut: &str) {
+/// Hold the shortcut to talk. Pressing it also cuts any speech (barge-in). Returns false when
+/// Windows refuses the key (usually because another program has it).
+fn register_push_to_talk(app: &tauri::AppHandle, core: Arc<server::ServerState>, shortcut: &str) -> bool {
     use std::sync::atomic::Ordering;
     use tauri::Emitter;
     use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
@@ -80,19 +84,187 @@ fn register_push_to_talk(app: &tauri::AppHandle, core: Arc<server::ServerState>,
             }
         }
     });
-    match result {
-        Ok(()) => tracing::info!("Push-to-talk registered on {shortcut}"),
-        Err(e) => tracing::warn!("Could not register push-to-talk {shortcut}: {e}"),
+    let ok = match result {
+        Ok(()) => {
+            tracing::info!("Push-to-talk registered on {shortcut}");
+            true
+        }
+        Err(e) => {
+            tracing::warn!("Could not register push-to-talk {shortcut}: {e}");
+            false
+        }
+    };
+    PTT_REGISTERED.store(ok, std::sync::atomic::Ordering::SeqCst);
+    ok
+}
+
+/// Pick another talk key. Keeps the old one if Windows refuses the new one.
+#[tauri::command]
+fn set_push_to_talk(
+    shortcut: String,
+    app: tauri::AppHandle,
+    state: tauri::State<'_, Arc<server::ServerState>>,
+) -> Result<(), String> {
+    use tauri_plugin_global_shortcut::GlobalShortcutExt;
+    let mut cfg = config::load_or_create_config().map_err(|e| e.to_string())?;
+    let shortcut = shortcut.trim().to_string();
+    if shortcut.is_empty() {
+        return Err("Type a key combination, for example Ctrl+Alt+K.".into());
     }
+    let _ = app.global_shortcut().unregister_all();
+    if register_push_to_talk(&app, state.inner().clone(), &shortcut) {
+        cfg.push_to_talk = shortcut;
+        return config::save_config(&cfg).map_err(|e| e.to_string());
+    }
+    // Put the old key back.
+    register_push_to_talk(&app, state.inner().clone(), &cfg.push_to_talk);
+    Err(format!("Windows would not give me {shortcut}: another program is using it, or it is not a valid key combination."))
+}
+
+/// `shown` is what the chat list displays as the user's message (a button's label, for example).
+#[tauri::command]
+async fn ask_question(
+    question: String,
+    shown: Option<String>,
+    state: tauri::State<'_, Arc<server::ServerState>>,
+) -> Result<(), String> {
+    let st = state.inner().clone();
+    tokio::spawn(async move {
+        brain::ask_and_present_as(st, question, shown).await;
+    });
+    Ok(())
+}
+
+/// The monocle was clicked: wait for a selection in VS Code (on), or stop waiting (off).
+/// Fails with "vscode" when VS Code is not linked, because there is nothing to look at then.
+#[tauri::command]
+fn set_look_mode(on: bool, state: tauri::State<'_, Arc<server::ServerState>>) -> Result<(), String> {
+    if on && !state.hub.is_connected() {
+        return Err("vscode".into());
+    }
+    look::set(state.inner(), on, if on { "monocle" } else { "cancelled" });
+    Ok(())
 }
 
 #[tauri::command]
-async fn ask_question(question: String, state: tauri::State<'_, Arc<server::ServerState>>) -> Result<(), String> {
-    let st = state.inner().clone();
-    tokio::spawn(async move {
-        brain::ask_and_present(st, question).await;
-    });
-    Ok(())
+fn set_look_after_select(after: config::AfterSelect) -> Result<(), String> {
+    let mut cfg = config::load_or_create_config().map_err(|e| e.to_string())?;
+    cfg.look.after_select = after;
+    config::save_config(&cfg).map_err(|e| e.to_string())
+}
+
+/// Forget the conversation so far.
+#[tauri::command]
+fn reset_conversation(state: tauri::State<'_, Arc<server::ServerState>>) {
+    brain::reset_conversation(state.inner());
+}
+
+#[derive(serde::Serialize)]
+struct SetupStatus {
+    has_key: bool,
+    /// VS Code is talking to Barnaby right now.
+    vscode: bool,
+    /// The extension is on disk, whether or not VS Code has loaded it yet.
+    extension_installed: bool,
+    folders: Vec<String>,
+    onboarding_done: bool,
+    talk_key: String,
+    talk_key_ok: bool,
+}
+
+/// True when Barnaby's extension sits in the extensions folder of VS Code or a close relative.
+fn extension_installed() -> bool {
+    let Some(home) = dirs::home_dir() else { return false };
+    [".vscode", ".vscode-insiders", ".cursor", ".antigravity"].iter().any(|d| {
+        std::fs::read_dir(home.join(d).join("extensions"))
+            .is_ok_and(|rd| rd.flatten().any(|e| e.file_name().to_string_lossy().starts_with("barnaby.barnaby-vscode")))
+    })
+}
+
+/// What the first-run guide ticks off.
+#[tauri::command]
+fn setup_status(state: tauri::State<'_, Arc<server::ServerState>>) -> SetupStatus {
+    let cfg = config::load_or_create_config().ok();
+    SetupStatus {
+        has_key: brain::load_api_key().is_some(),
+        vscode: state.hub.is_connected(),
+        extension_installed: extension_installed(),
+        folders: state.hub.workspace_folders(),
+        onboarding_done: cfg.as_ref().map(|c| c.onboarding_done).unwrap_or(false),
+        talk_key: cfg.map(|c| c.push_to_talk).unwrap_or_default(),
+        talk_key_ok: PTT_REGISTERED.load(std::sync::atomic::Ordering::SeqCst),
+    }
+}
+
+/// The guide was finished or skipped: do not show it on every start.
+#[tauri::command]
+fn finish_onboarding() -> Result<(), String> {
+    let mut cfg = config::load_or_create_config().map_err(|e| e.to_string())?;
+    cfg.onboarding_done = true;
+    config::save_config(&cfg).map_err(|e| e.to_string())
+}
+
+/// The newest `barnaby-vscode-*.vsix` that ships beside the app (or in the repo while developing).
+fn find_vsix() -> Option<std::path::PathBuf> {
+    let exe = std::env::current_exe().ok()?;
+    exe.ancestors().find_map(|dir| {
+        ["vscode-extension", "resources/vscode"].iter().find_map(|sub| {
+            let mut found: Vec<std::path::PathBuf> = std::fs::read_dir(dir.join(sub))
+                .ok()?
+                .flatten()
+                .map(|e| e.path())
+                .filter(|p| {
+                    p.extension().is_some_and(|x| x == "vsix")
+                        && p.file_name().is_some_and(|n| n.to_string_lossy().starts_with("barnaby-vscode"))
+                })
+                .collect();
+            found.sort();
+            found.pop()
+        })
+    })
+}
+
+/// VS Code's command line tool: on PATH, or in the default per-user install.
+fn find_code_cli() -> Option<std::path::PathBuf> {
+    let on_path = std::env::var_os("PATH")
+        .into_iter()
+        .flat_map(|p| std::env::split_paths(&p).collect::<Vec<_>>())
+        .map(|d| d.join("code.cmd"))
+        .find(|p| p.exists());
+    on_path.or_else(|| {
+        let local = std::env::var_os("LOCALAPPDATA")?;
+        let p = std::path::PathBuf::from(local).join("Programs/Microsoft VS Code/bin/code.cmd");
+        p.exists().then_some(p)
+    })
+}
+
+/// Install Barnaby's extension into VS Code. The user pressed the button, so this is their go-ahead.
+#[tauri::command]
+async fn install_vscode_extension() -> Result<String, String> {
+    tokio::task::spawn_blocking(|| {
+        use std::os::windows::process::CommandExt;
+        let vsix = find_vsix().ok_or("I could not find my VS Code extension file (barnaby-vscode-*.vsix).")?;
+        let code = find_code_cli().ok_or_else(|| {
+            format!(
+                "I could not find VS Code's command line. In VS Code open Extensions, choose Install from VSIX, and pick {}.",
+                vsix.display()
+            )
+        })?;
+        let out = std::process::Command::new(code)
+            .arg("--install-extension")
+            .arg(&vsix)
+            .arg("--force")
+            .creation_flags(0x0800_0000) // CREATE_NO_WINDOW
+            .output()
+            .map_err(|e| format!("Could not run VS Code: {e}"))?;
+        if out.status.success() {
+            Ok("Installed. In VS Code press Ctrl+Shift+P and run \"Reload Window\", and I will notice it.".to_string())
+        } else {
+            Err(format!("VS Code said: {}", String::from_utf8_lossy(&out.stderr).trim()))
+        }
+    })
+    .await
+    .map_err(|e| e.to_string())?
 }
 
 #[tauri::command]
@@ -142,6 +314,14 @@ async fn connect_claude() -> Result<String, String> {
 fn set_tour_navigate(navigate: bool) -> Result<(), String> {
     let mut cfg = config::load_or_create_config().map_err(|e| e.to_string())?;
     cfg.tour.navigate = navigate;
+    config::save_config(&cfg).map_err(|e| e.to_string())
+}
+
+/// Tour setting: wait for the person at each step, or move on by himself.
+#[tauri::command]
+fn set_tour_pace(pace: config::TourPace) -> Result<(), String> {
+    let mut cfg = config::load_or_create_config().map_err(|e| e.to_string())?;
+    cfg.tour.pace = pace;
     config::save_config(&cfg).map_err(|e| e.to_string())
 }
 
@@ -223,6 +403,13 @@ pub fn run() {
             overlay_ready,
             ptt_audio,
             ask_question,
+            set_look_mode,
+            set_look_after_select,
+            reset_conversation,
+            setup_status,
+            finish_onboarding,
+            install_vscode_extension,
+            set_push_to_talk,
             accept_tour,
             tour_control,
             save_api_key,
@@ -231,6 +418,7 @@ pub fn run() {
             connect_preview_claude,
             connect_claude,
             set_tour_navigate,
+            set_tour_pace,
             say_text,
             preview_voice,
             app_status,
@@ -405,6 +593,7 @@ pub fn run() {
                 registry: Arc::new(agents::AgentRegistry::default()),
                 hub,
                 tours,
+                conversation: Default::default(),
             });
             app.manage(core.clone());
             register_push_to_talk(app.handle(), core.clone(), &app_config.push_to_talk);

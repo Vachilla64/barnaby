@@ -10,15 +10,16 @@ export function initSettingsView(container: HTMLElement): void {
       </header>
 
       <div class="settings-body">
-        <!-- 1. Meta API Key -->
+        <!-- Brain: Meta API key -->
         <section class="settings-card">
           <label class="card-title">Meta Model API Key</label>
-          <p class="card-desc">Used for code comprehension and codebase tours via <code>muse-spark-1.3</code>.</p>
-          <div class="input-row">
-            <input type="password" id="meta-key-input" placeholder="Enter your Meta API key..." />
-            <button id="test-key-btn" class="btn btn-secondary">Test</button>
+          <p class="card-desc">Barnaby's brain (<code>muse-spark-1.3</code>) needs a Meta Model API key to answer questions about your code. It is stored in Windows Credential Manager. Test checks the key you pasted, or the saved one if the box is empty.</p>
+          <div style="display: flex; gap: 8px; align-items: center;">
+            <input type="password" id="api-key-input" class="select-voice" style="flex: 1;" placeholder="Paste your Meta API key" />
+            <button id="api-key-save" class="btn btn-primary btn-sm">Save</button>
+            <button id="api-key-test" class="btn btn-secondary btn-sm">Test</button>
           </div>
-          <span id="key-status-msg" class="status-msg"></span>
+          <span id="api-key-msg" class="status-msg"></span>
         </section>
 
         <!-- 2. Voice & TTS (Phonon) -->
@@ -50,6 +51,10 @@ export function initSettingsView(container: HTMLElement): void {
               <div class="voice-agent-item">
                 <span>Claude Code</span>
                 <select id="voice-claude" class="select-voice">
+                  <option value="Sir Bramwell">Sir Bramwell (pompous English knight)</option>
+                  <option value="Master Aldric">Master Aldric (old British wizard)</option>
+                  <option value="Hugh">Hugh</option>
+                  <option value="Teddy">Teddy</option>
                   <option value="Freya">Freya</option>
                   <option value="Toby">Toby (British)</option>
                   <option value="Easton">Easton</option>
@@ -59,6 +64,10 @@ export function initSettingsView(container: HTMLElement): void {
               <div class="voice-agent-item">
                 <span>Gemini CLI</span>
                 <select id="voice-gemini" class="select-voice">
+                  <option value="Sir Bramwell">Sir Bramwell (pompous English knight)</option>
+                  <option value="Master Aldric">Master Aldric (old British wizard)</option>
+                  <option value="Hugh">Hugh</option>
+                  <option value="Teddy">Teddy</option>
                   <option value="Easton">Easton</option>
                   <option value="Freya">Freya</option>
                   <option value="Toby">Toby (British)</option>
@@ -68,9 +77,11 @@ export function initSettingsView(container: HTMLElement): void {
               <div class="voice-agent-item">
                 <span>Barnaby</span>
                 <select id="voice-barnaby" class="select-voice">
-                  <option value="Toby">Toby (British)</option>
-                  <option value="Master Aldric">Master Aldric (old British wizard)</option>
                   <option value="Sir Bramwell">Sir Bramwell (pompous English knight)</option>
+                  <option value="Master Aldric">Master Aldric (old British wizard)</option>
+                  <option value="Hugh">Hugh</option>
+                  <option value="Teddy">Teddy</option>
+                  <option value="Toby">Toby (British)</option>
                   <option value="Alfie">Alfie (British)</option>
                   <option value="Freya">Freya</option>
                   <option value="Easton">Easton</option>
@@ -79,6 +90,10 @@ export function initSettingsView(container: HTMLElement): void {
               <div class="voice-agent-item">
                 <span>Other Agents</span>
                 <select id="voice-other" class="select-voice">
+                  <option value="Sir Bramwell">Sir Bramwell (pompous English knight)</option>
+                  <option value="Master Aldric">Master Aldric (old British wizard)</option>
+                  <option value="Hugh">Hugh</option>
+                  <option value="Teddy">Teddy</option>
                   <option value="Toby">Toby (British)</option>
                   <option value="Alfie">Alfie (British)</option>
                   <option value="Freya">Freya</option>
@@ -92,33 +107,46 @@ export function initSettingsView(container: HTMLElement): void {
         <!-- 3. Push to Talk -->
         <section class="settings-card">
           <label class="card-title">Push-to-Talk</label>
-          <p class="card-desc">Hold to ask questions about your active codebase.</p>
-          <div class="shortcut-box">
-            <kbd id="ptt-key">Ctrl + Alt + Space</kbd>
+          <p class="card-desc">Hold this key and speak. If another program already uses it, pick a different one. The microphone beside the chat box works either way.</p>
+          <div class="form-row">
+            <input type="text" id="ptt-key" class="select-voice" spellcheck="false" />
+            <button type="button" id="ptt-save" class="btn btn-secondary btn-sm">Use this key</button>
           </div>
+          <span id="ptt-msg" class="status-msg"></span>
+        </section>
+
+        <!-- Look mode -->
+        <section class="settings-card">
+          <label class="card-title">Look mode</label>
+          <p class="card-desc">Click Barnaby's monocle, then select code in VS Code. This is what he does once your selection settles.</p>
+          <div class="form-row">
+            <label for="look-after">After I select code:</label>
+            <select id="look-after" class="select-voice">
+              <option value="choices">Offer choices (Explain it, Why is it here, ...)</option>
+              <option value="explain">Explain it right away</option>
+              <option value="listen">Listen for my voice</option>
+            </select>
+          </div>
+          <span id="look-after-msg" class="status-msg"></span>
         </section>
 
         <!-- Tours -->
         <section class="settings-card">
           <label class="card-title">Tours</label>
-          <p class="card-desc">Barnaby always says where to look. You choose whether he also moves VS Code for you.</p>
+          <p class="card-desc">A tour is a short walk through a few places in your code. Barnaby tells you the plan first, then shows one stop at a time.</p>
+          <div class="form-row">
+            <label for="tour-pace">Pace:</label>
+            <select id="tour-pace">
+              <option value="wait">I wait for you at each stop (press Next or say "next")</option>
+              <option value="auto">I keep going on my own</option>
+            </select>
+          </div>
+          <span id="tour-pace-msg" class="status-msg"></span>
           <div class="form-row">
             <label for="tour-navigate">Open files and highlight lines in VS Code:</label>
             <input type="checkbox" id="tour-navigate" checked />
           </div>
           <span id="tour-navigate-msg" class="status-msg"></span>
-        </section>
-
-        <!-- Brain: Meta API key -->
-        <section class="settings-card">
-          <label class="card-title">Brain (Muse Spark)</label>
-          <p class="card-desc">Barnaby needs a Meta Model API key to answer questions about your code. It is stored in Windows Credential Manager.</p>
-          <div style="display: flex; gap: 8px; align-items: center;">
-            <input type="password" id="api-key-input" class="select-voice" style="flex: 1;" placeholder="Paste your Meta API key" />
-            <button id="api-key-save" class="btn btn-primary btn-sm">Save</button>
-            <button id="api-key-test" class="btn btn-secondary btn-sm">Test</button>
-          </div>
-          <span id="api-key-msg" class="status-msg"></span>
         </section>
 
         <!-- 4. Connect Coding Agents -->
@@ -163,11 +191,13 @@ export function initSettingsView(container: HTMLElement): void {
     .then((cfg) => {
       const volSlider = document.getElementById("volume-slider") as HTMLInputElement;
       const muteToggle = document.getElementById("mute-all-toggle") as HTMLInputElement;
-      const pttKey = document.getElementById("ptt-key") as HTMLElement;
+      const pttKey = document.getElementById("ptt-key") as HTMLInputElement;
+      const lookAfter = document.getElementById("look-after") as HTMLSelectElement | null;
 
       if (volSlider) volSlider.value = cfg.voice.volume.toString();
       if (muteToggle) muteToggle.checked = !cfg.voice.enabled;
-      if (pttKey) pttKey.textContent = cfg.push_to_talk || "Ctrl + Alt + Space";
+      if (pttKey) pttKey.value = cfg.push_to_talk || "Ctrl+Alt+Space";
+      if (lookAfter) lookAfter.value = cfg.look?.after_select ?? "choices";
 
       // Populate voice selects
       const voices = cfg.voice.voices || {};
@@ -183,6 +213,8 @@ export function initSettingsView(container: HTMLElement): void {
 
       const navToggle = document.getElementById("tour-navigate") as HTMLInputElement | null;
       if (navToggle) navToggle.checked = cfg.tour?.navigate ?? true;
+      const paceSel = document.getElementById("tour-pace") as HTMLSelectElement | null;
+      if (paceSel) paceSel.value = cfg.tour?.pace ?? "wait";
 
       // Render projects
       const list = document.getElementById("projects-list");
@@ -221,6 +253,46 @@ export function initSettingsView(container: HTMLElement): void {
   bindVoiceSelect("voice-gemini", "gemini-cli");
   bindVoiceSelect("voice-barnaby", "barnaby");
   bindVoiceSelect("voice-other", "other");
+
+  // Talk key: try the new key straight away; the old one stays if Windows refuses it
+  const pttInput = document.getElementById("ptt-key") as HTMLInputElement | null;
+  const pttMsg = document.getElementById("ptt-msg");
+  document.getElementById("ptt-save")?.addEventListener("click", () => {
+    if (pttMsg) pttMsg.textContent = "";
+    invoke("set_push_to_talk", { shortcut: pttInput?.value ?? "" })
+      .then(() => {
+        if (pttMsg) pttMsg.textContent = `Hold ${pttInput?.value.trim()} to talk.`;
+      })
+      .catch((e) => {
+        if (pttMsg) pttMsg.textContent = `${e}`;
+      });
+  });
+
+  // Look mode: what he does once a selection settles
+  const lookAfterSel = document.getElementById("look-after") as HTMLSelectElement | null;
+  const lookAfterMsg = document.getElementById("look-after-msg");
+  lookAfterSel?.addEventListener("change", () => {
+    invoke("set_look_after_select", { after: lookAfterSel.value })
+      .then(() => {
+        if (lookAfterMsg) lookAfterMsg.textContent = "Saved.";
+      })
+      .catch((e) => {
+        if (lookAfterMsg) lookAfterMsg.textContent = `${e}`;
+      });
+  });
+
+  // Tours: who sets the pace
+  const paceSel = document.getElementById("tour-pace") as HTMLSelectElement | null;
+  const paceMsg = document.getElementById("tour-pace-msg");
+  paceSel?.addEventListener("change", () => {
+    invoke("set_tour_pace", { pace: paceSel.value })
+      .then(() => {
+        if (paceMsg) paceMsg.textContent = paceSel.value === "wait" ? "Barnaby will wait for you at each stop." : "Barnaby will keep going on his own.";
+      })
+      .catch((e) => {
+        if (paceMsg) paceMsg.textContent = `${e}`;
+      });
+  });
 
   // Tours: move VS Code, or only say where to look
   const navToggle = document.getElementById("tour-navigate") as HTMLInputElement | null;
@@ -333,34 +405,45 @@ export function initSettingsView(container: HTMLElement): void {
   // Meta API key: save, test
   const keyInput = document.getElementById("api-key-input") as HTMLInputElement | null;
   const keyMsg = document.getElementById("api-key-msg");
-  const setKeyMsg = (text: string) => {
-    if (keyMsg) keyMsg.textContent = text;
+  const setKeyMsg = (text: string, kind: "ok" | "error" | "busy" = "ok") => {
+    if (!keyMsg) return;
+    keyMsg.textContent = text;
+    keyMsg.dataset.kind = kind;
   };
   invoke<boolean>("has_api_key")
     .then((has) => {
       if (has && keyInput) keyInput.placeholder = "A key is saved. Paste a new one to replace it.";
     })
     .catch(console.error);
-  document.getElementById("api-key-save")?.addEventListener("click", async () => {
+  const saveTypedKey = async (): Promise<boolean> => {
     const key = keyInput?.value.trim() ?? "";
-    if (!key) {
-      setKeyMsg("Paste a key first.");
-      return;
+    if (!key) return false;
+    await invoke("save_api_key", { key });
+    if (keyInput) {
+      keyInput.value = "";
+      keyInput.placeholder = "A key is saved. Paste a new one to replace it.";
     }
+    return true;
+  };
+  document.getElementById("api-key-save")?.addEventListener("click", async () => {
     try {
-      await invoke("save_api_key", { key });
-      if (keyInput) keyInput.value = "";
-      setKeyMsg("Saved.");
+      if (await saveTypedKey()) setKeyMsg("Saved.");
+      else setKeyMsg("Paste a key first.", "error");
     } catch (e) {
-      setKeyMsg(`${e}`);
+      setKeyMsg(`${e}`, "error");
     }
   });
   document.getElementById("api-key-test")?.addEventListener("click", async () => {
-    setKeyMsg("Testing...");
+    const testBtn = document.getElementById("api-key-test") as HTMLButtonElement;
+    testBtn.disabled = true;
+    setKeyMsg("Testing...", "busy");
     try {
-      setKeyMsg(await invoke<string>("test_api_key"));
+      await saveTypedKey();
+      setKeyMsg(await invoke<string>("test_api_key"), "ok");
     } catch (e) {
-      setKeyMsg(`${e}`);
+      setKeyMsg(`${e}`, "error");
+    } finally {
+      testBtn.disabled = false;
     }
   });
 

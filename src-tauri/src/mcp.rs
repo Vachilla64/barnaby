@@ -43,13 +43,14 @@ fn tools() -> Value {
         },
         {
             "name": "barnaby_tour",
-            "description": "Walk the user through code you wrote: up to 12 steps, each with a file path, a line range and one spoken sentence.",
+            "description": "Walk the user through code you wrote: 3 to 5 steps (6 at most), one idea each, in plain everyday English. Each step has a file path, a line range, a short title (2 to 5 words) and one or two short spoken sentences. The user moves from step to step at their own pace. End with a recap: the one thing to remember.",
             "inputSchema": {"type": "object", "properties": {
                 "title": {"type": "string"},
-                "steps": {"type": "array", "maxItems": 12, "items": {"type": "object", "properties": {
+                "steps": {"type": "array", "maxItems": 6, "items": {"type": "object", "properties": {
                     "path": {"type": "string"}, "start_line": {"type": "integer"},
-                    "end_line": {"type": "integer"}, "narration": {"type": "string"}
-                }, "required": ["path", "start_line", "end_line", "narration"]}}
+                    "end_line": {"type": "integer"}, "title": {"type": "string"}, "narration": {"type": "string"}
+                }, "required": ["path", "start_line", "end_line", "narration"]}},
+                "recap": {"type": "string"}
             }, "required": ["title", "steps"]}
         }
     ])
@@ -106,7 +107,8 @@ async fn call_tool(state: &ServerState, kind: &str, name: &str, args: &Value) ->
                 .and_then(|v| serde_json::from_value(v).ok())
                 .unwrap_or_default();
             state.registry.touch(kind, None, Some(&format!("tour: {title}")));
-            let n = state.tours.start(kind, title, steps, crate::server::pet_colour(kind)).await;
+            let tour = crate::tours::Tour { title: title.to_string(), steps, recap: str_arg(args, "recap").to_string() };
+            let n = state.tours.start(kind, tour, crate::server::pet_colour(kind)).await;
             if n == 0 {
                 Err("No tour steps pointed at files I can find. Use absolute paths or paths inside an open workspace.".into())
             } else {

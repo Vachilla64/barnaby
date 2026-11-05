@@ -13,7 +13,7 @@ You are building **Barnaby**, a Windows desktop pet app that speaks for coding a
 7. **Test what is pure** (command matcher, sentence splitter, throttle, hook mapping, tour validation) with `cargo test`. Test the desktop behaviour by hand, with the user driving. **Never move the user's mouse or type into their windows** to test.
 8. **If the spec is unclear or wrong**, pick the simplest option that serves the demo story (SPEC section 2), write the decision under "Notes" in TASKS.md, and keep going. Ask the user only when the choice is expensive to undo.
 9. **Time is short (deadline 2am).** Tick TASKS.md in batches, not per task. Commit often (rule 4). Hand-test once per phase, not per task. No spoken progress updates while building.
-10. Barnaby's voice is a British male voice from Phonon's catalog (`Toby` by default; `Master Aldric` and `Sir Bramwell` suit the old-gentleman character). The product speaks for agents; the build process does not need to.
+10. Barnaby's voice is `Sir Bramwell` from Phonon's catalog (`Master Aldric` also suits the old-gentleman character). He calls himself Sir Barnaby. The product speaks for agents; the build process does not need to.
 
 ## Rules
 
@@ -30,6 +30,8 @@ You are building **Barnaby**, a Windows desktop pet app that speaks for coding a
 
 ## Useful facts
 
-- Phonon TTS is installed on the dev machine as a uv tool (`ptts`). The server script is `resources/phonon/phonon_server.py`. Run it by hand with `uv tool run --from ptts python resources/phonon/phonon_server.py`. It listens on `127.0.0.1:8001`; first start takes about 2 minutes. Barnaby's default voice is a British male voice from Phonon's default catalog (`Toby`).
+- **Do not test the VS Code link with a Barnaby that an agent started.** This session's tools run inside the Claude desktop app, which is a packaged (MSIX) app. Anything it launches sees a private copy of `%APPDATA%`: Barnaby's `config.json`, token and logs land in `%LOCALAPPDATA%\Packages\Claude_pzs8sxrjxfjjc\LocalCache\Roaming\Barnaby`, and VS Code (a normal app) gets ENOENT for `%APPDATA%\Barnaby\config.json`. The extension then never connects, silently. The user must start Barnaby from their own terminal (`pnpm tauri dev`) for any test that involves VS Code. Fake clients started by an agent share the agent's view, so they connect fine and prove nothing about this. The same goes for anything an agent installs under `%APPDATA%` or `%LOCALAPPDATA%`: `pnpm` (installed with `npm i -g`) exists only in that private copy, so a normal terminal says "'pnpm' is not recognized" until the user runs `npm install -g pnpm` themselves.
+
+- Phonon TTS is installed on the dev machine as a uv tool (`ptts`). The server script is `resources/phonon/phonon_server.py`. Run it by hand with `uv tool run --from ptts python resources/phonon/phonon_server.py`. It listens on `127.0.0.1:8001`; first start takes about 2 minutes. Barnaby's default voice is `Sir Bramwell`.
 - Meta Model API: base `https://api.meta.ai/v1`, `Authorization: Bearer $MODEL_API_KEY`, model `muse-spark-1.3`, OpenAI-compatible Chat Completions. Docs: https://dev.meta.ai/docs/
 - Hackathon deadline: **2026-11-04, 9:00 PM ET**. Scope cuts are listed at the end of SPEC section 9.

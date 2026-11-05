@@ -21,6 +21,8 @@ pub struct ServerState {
     pub registry: Arc<crate::agents::AgentRegistry>,
     pub hub: Arc<crate::vscode::VsCodeHub>,
     pub tours: Arc<crate::tours::TourEngine>,
+    /// What has been asked and answered so far, so follow-up questions make sense.
+    pub conversation: Arc<std::sync::Mutex<crate::brain::Conversation>>,
 }
 
 #[derive(Serialize)]
@@ -55,7 +57,7 @@ pub fn voice_for(kind: &str) -> String {
     crate::config::load_or_create_config()
         .ok()
         .and_then(|cfg| cfg.voice.voices.get(kind).cloned())
-        .unwrap_or_else(|| "Toby".into())
+        .unwrap_or_else(|| crate::config::DEFAULT_VOICE.into())
 }
 
 /// The pet colour for an agent kind, used to tint VS Code highlights.
@@ -173,9 +175,9 @@ async fn say_handler(
                 .voices
                 .get(&agent_id)
                 .cloned()
-                .unwrap_or_else(|| "Toby".into())
+                .unwrap_or_else(|| crate::config::DEFAULT_VOICE.into())
         } else {
-            "Toby".into()
+            crate::config::DEFAULT_VOICE.into()
         };
 
         queue
@@ -307,6 +309,7 @@ pub fn test_state_with_token(token: &str) -> ServerState {
         registry: Arc::new(crate::agents::AgentRegistry::default()),
         hub: hub.clone(),
         tours: crate::tours::TourEngine::new(hub, None, None),
+        conversation: Default::default(),
     }
 }
 

@@ -23,11 +23,13 @@ pnpm install
 pnpm tauri dev
 ```
 
-The first start downloads the Phonon voice model, which takes a few minutes. Barnaby appears as a pet at the bottom right of your screen and as a tray icon.
+The first start downloads the Phonon voice model, which takes a few minutes. Barnaby appears as a pet at the bottom right of your screen and as a tray icon. On a first run he opens a short setup guide beside him: paste the Meta API key, install the VS Code extension, and see whether his voice and talk key are ready. Each line ticks off by itself.
+
+To stop him, use the tray icon (Quit) or his radial menu. Quit him before running `pnpm tauri dev` again, or the new build cannot replace the running exe.
 
 ## Set it up (Settings window: tray icon, then Settings)
 
-1. **Voice:** if Phonon is not ready, press the install buttons. Pick a voice. The old-gentleman voices are `Master Aldric` and `Sir Bramwell`.
+1. **Voice:** if Phonon is not ready, press the install buttons. Barnaby's default voice is `Sir Bramwell`. `Master Aldric`, `Hugh` and `Teddy` also suit him.
 2. **Brain:** paste your Meta API key and press Test. The key is stored in Windows Credential Manager. The `MODEL_API_KEY` environment variable also works.
 3. **Connect Claude Code:** press Connect. Barnaby shows exactly what it will change, then asks. It merges hooks into `~/.claude/settings.json` (a backup is saved) and registers an MCP server named `barnaby`. Restart your Claude Code sessions.
 4. **Copy instructions snippet:** paste it into `CLAUDE.md` so the agent calls `barnaby_status` and `barnaby_done`.
@@ -39,19 +41,22 @@ The first start downloads the Phonon voice model, which takes a few minutes. Bar
 cd vscode-extension
 pnpm install
 pnpm package
-code --install-extension barnaby-vscode-0.1.0.vsix
+code --install-extension barnaby-vscode-0.1.2.vsix
 ```
 
-A Barnaby item appears in the status bar. It turns green when the app is running.
+The setup guide can do this for you (the "Install it in VS Code" button). Reload the VS Code window afterwards. A Barnaby item appears in the status bar. It turns green when the app is running.
 
 ## Use it
 
 | You do | Barnaby does |
 |---|---|
 | Work with Claude Code | Speaks status updates, says when it needs your approval, and says when it has finished |
-| Click the pet, then `Ask…`, or run `Barnaby: Ask about this` in VS Code | Answers out loud, then offers a tour |
-| Say "show me" or "walk me through" in the question | Starts the tour at once |
-| Press `Next`, `Back`, `Stop` in the bubble, or `Alt+]`, `Alt+[`, `Alt+Escape` in VS Code | Moves through the tour |
+| Click his monocle, then select code in VS Code | Look mode: a lens follows your mouse. When the selection settles he tells you which lines he sees and offers Explain it, Why is it here, Where is it used, What could break. Settings > Look mode changes this to "explain right away" or "listen for my voice" |
+| Click the pet, then `Chat with me`, or run `Barnaby: Ask about this` in VS Code | Opens the conversation list beside him. He answers out loud and in the list, remembers earlier questions, and offers follow-up buttons and a tour |
+| Hold the talk key (default `Ctrl+Alt+Space`) or press the microphone in the chat box | Listens, shows what he heard in the list, and answers. The key can be changed in Settings if another program has it |
+| Ask something that lives in several places | He gives the answer in plain words and tells you the plan ("I will show you three things: ..."), also listed in the chat. Press `Show me` to start |
+| Say "show me" or "walk me through" in the question | Starts the tour right after the plan |
+| Press `Next`, `Back`, `Stop` on the tour card, or `Alt+]`, `Alt+[`, `Alt+Escape` in VS Code | Moves through the tour. He shows one stop, explains it, then waits for you (Settings > Tours > Pace lets him keep going on his own). At the end he says the one thing to remember |
 
 Try it on the sample app in `demo-project/`: open that folder in VS Code and ask "Where is the login handled?"
 

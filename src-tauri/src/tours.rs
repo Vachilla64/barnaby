@@ -1,5 +1,6 @@
 //! Tour engine: walks the user through code, one step at a time, in step with speech.
 
+use crate::config::TourPace;
 use crate::vscode::VsCodeHub;
 use crate::voice::queue::{Priority, SpeechKind, SpeechQueue};
 use serde::{Deserialize, Serialize};
@@ -10,16 +11,44 @@ use std::time::Duration;
 use tauri::{AppHandle, Emitter};
 use tokio::sync::{mpsc, Mutex};
 
-pub const MAX_STEPS: usize = 12;
+/// A walk with more stops than a person can hold in mind is a tour nobody follows.
+pub const MAX_STEPS: usize = 6;
 const SHOWN_TIMEOUT: Duration = Duration::from_secs(3);
-const PAUSE_BETWEEN_STEPS: Duration = Duration::from_millis(1200);
+/// In `TourPace::Auto`: a breath between one step and the next.
+const PAUSE_BETWEEN_STEPS: Duration = Duration::from_millis(2500);
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct TourStep {
     pub path: String,
     pub start_line: u32,
     pub end_line: u32,
+    /// Two to five plain words naming the step. Agents' tours may leave it out.
+    #[serde(default)]
+    pub title: String,
     pub narration: String,
+}
+
+impl TourStep {
+    /// What the step is called on screen: its title, or the file name when it has none.
+    pub fn label(&self) -> String {
+        let title = self.title.trim();
+        if !title.is_empty() {
+            return title.to_string();
+        }
+        Path::new(&self.path)
+            .file_name()
+            .map(|f| f.to_string_lossy().to_string())
+            .unwrap_or_else(|| self.path.clone())
+    }
+}
+
+/// A whole tour: what it is called, its steps, and the one thing to remember at the end.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Tour {
+    pub title: String,
+    pub steps: Vec<TourStep>,
+    /// One sentence he says after the last step. May be empty.
+    pub recap: String,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -58,6 +87,29 @@ pub fn jump(index: usize, total: usize, action: Control) -> Move {
         Control::Back => Move::Goto(index.saturating_sub(1)),
         Control::Pause | Control::Resume => Move::Goto(index),
     }
+}
+
+/// The recap as a plain statement. He introduces it ("The thing to remember: ..."), so a recap that
+/// begins with "Remember" would say it twice.
+pub fn clean_recap(recap: &str) -> String {
+    let r = recap.trim();
+    let lower = r.to_lowercase();
+    let rest = ["remember that ", "remember: ", "remember, ", "remember "]
+        .iter()
+        .find(|p| lower.starts_with(*p))
+        .map(|p| r[p.len()..].trim_start())
+        .unwrap_or(r);
+    let mut chars = rest.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().chain(chars).collect(),
+        None => String::new(),
+    }
+}
+
+/// After a step has been spoken: does he stop and wait for the person? Never after the last step,
+/// which simply ends.
+pub fn waits_for_person(pace: TourPace, index: usize, total: usize) -> bool {
+    pace == TourPace::Wait && index + 1 < total
 }
 
 /// Resolve a tour path against the known workspace folders. Absolute paths pass through.
@@ -101,9 +153,13 @@ pub fn where_phrase(step: &TourStep) -> String {
     format!("Look at {lines} of {}.", spoken_file(&step.path))
 }
 
-/// The narration, with the location in front unless the narration already names the file
-/// (the full name, like "login.ts", or the way it is said, like "login dot ts").
-pub fn spoken_step(step: &TourStep) -> String {
+/// What he says for a step. When VS Code is following along, the highlight already shows where to
+/// look, so he only talks about the code. Otherwise the location goes in front, unless the narration
+/// already names the file (the full name, like "login.ts", or the way it is said, like "login dot ts").
+pub fn spoken_step(step: &TourStep, following: bool) -> String {
+    if following {
+        return step.narration.clone();
+    }
     let name = Path::new(&step.path)
         .file_name()
         .map(|s| s.to_string_lossy().to_lowercase())
@@ -137,6 +193,7 @@ pub fn validate_steps(steps: Vec<TourStep>, roots: &[String]) -> Vec<TourStep> {
                 path: abs.components().collect::<PathBuf>().to_string_lossy().to_string(),
                 start_line: start,
                 end_line: end,
+                title: s.title,
                 narration: s.narration,
             })
         })
@@ -148,7 +205,7 @@ pub struct TourEngine {
     hub: Arc<VsCodeHub>,
     queue: Option<SpeechQueue>,
     app: Option<AppHandle>,
-    pending: std::sync::Mutex<Option<(String, Vec<TourStep>)>>,
+    pending: std::sync::Mutex<Option<Tour>>,
     control_tx: Mutex<Option<mpsc::Sender<Control>>>,
 }
 
@@ -170,9 +227,9 @@ impl TourEngine {
     }
 
     /// Start a tour, replacing any tour that is running. Returns the number of steps.
-    pub async fn start(self: &Arc<Self>, agent_kind: &str, title: &str, steps: Vec<TourStep>, colour: String) -> usize {
+    pub async fn start(self: &Arc<Self>, agent_kind: &str, tour: Tour, colour: String) -> usize {
         let roots = self.hub.workspace_folders();
-        let steps = validate_steps(steps, &roots);
+        let steps = validate_steps(tour.steps, &roots);
         if steps.is_empty() {
             return 0;
         }
@@ -187,9 +244,9 @@ impl TourEngine {
         }
         let engine = self.clone();
         let kind = agent_kind.to_string();
-        let title = title.to_string();
+        let (title, recap) = (tour.title, tour.recap);
         tokio::spawn(async move {
-            engine.run(&kind, &title, steps, colour, rx).await;
+            engine.run(&kind, &title, &recap, steps, colour, rx).await;
         });
         total
     }
@@ -215,14 +272,14 @@ impl TourEngine {
     }
 
     /// Hold a tour the brain proposed until the user says "Show me".
-    pub fn set_pending(&self, title: &str, steps: Vec<TourStep>) {
-        *self.pending.lock().unwrap() = Some((title.to_string(), steps));
+    pub fn set_pending(&self, tour: Tour) {
+        *self.pending.lock().unwrap() = Some(tour);
     }
 
     pub async fn start_pending(self: &Arc<Self>, agent_kind: &str, colour: String) -> usize {
         let taken = self.pending.lock().unwrap().take();
         match taken {
-            Some((title, steps)) => self.start(agent_kind, &title, steps, colour).await,
+            Some(tour) => self.start(agent_kind, tour, colour).await,
             None => 0,
         }
     }
@@ -233,16 +290,24 @@ impl TourEngine {
         }
     }
 
-    async fn run(&self, kind: &str, title: &str, steps: Vec<TourStep>, colour: String, mut rx: mpsc::Receiver<Control>) {
+    async fn run(&self, kind: &str, title: &str, recap: &str, steps: Vec<TourStep>, colour: String, mut rx: mpsc::Receiver<Control>) {
         let tour_id = format!("tour-{}", std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).map(|d| d.as_millis()).unwrap_or(0));
         let total = steps.len();
         let mut index = 0usize;
-        // Settings: move VS Code for the user, or only say where to look.
-        let navigate = crate::config::load_or_create_config().map(|c| c.tour.navigate).unwrap_or(true);
+        // Settings: move VS Code for the user or only say where to look, and who sets the pace.
+        let settings = crate::config::load_or_create_config().map(|c| c.tour).unwrap_or_default();
+        let (navigate, pace) = (settings.navigate, settings.pace);
+        let mut finished = false;
         tracing::info!(
-            "Tour '{title}' started: {total} steps (vscode connected: {}, navigate: {navigate})",
+            "Tour '{title}' started: {total} steps (vscode connected: {}, navigate: {navigate}, pace: {pace:?})",
             self.hub.is_connected()
         );
+        // The agenda first: what the person is about to be shown, in order.
+        self.emit("tour:start", json!({
+            "agent_kind": kind, "tour_id": tour_id, "title": title, "total": total, "pace": pace,
+            "labels": steps.iter().map(TourStep::label).collect::<Vec<_>>(),
+            "vscode": navigate && self.hub.is_connected()
+        }));
 
         'tour: loop {
             let step = &steps[index];
@@ -256,7 +321,7 @@ impl TourEngine {
             self.emit("tour:step", json!({
                 "agent_kind": kind, "tour_id": tour_id, "index": index, "total": total,
                 "path": step.path, "start_line": step.start_line, "end_line": step.end_line,
-                "narration": step.narration, "title": title, "vscode": connected
+                "narration": step.narration, "title": step.label(), "vscode": connected
             }));
 
             // Wait for VS Code to show the step (or a control, or the timeout).
@@ -271,28 +336,50 @@ impl TourEngine {
                 }
             }
 
-            self.say(kind, &spoken_step(step)).await;
+            self.say(kind, &spoken_step(step, connected)).await;
 
-            // Wait for the speech to finish, then the gap, listening for controls throughout.
+            // Wait for the speech to finish, then either for the person (they set the pace) or for a
+            // short breath. Controls are heard throughout.
             let mut paused = false;
+            let mut waiting = false;
             let mut gap_left: Option<Duration> = None;
             loop {
                 let tick = tokio::time::sleep(Duration::from_millis(100));
                 tokio::select! {
                     c = rx.recv() => {
+                        // "Go on" while he waits for you means the same as "next".
+                        let c = match c {
+                            Some(Control::Resume) if waiting => Some(Control::Next),
+                            other => other,
+                        };
                         match c {
                             Some(Control::Pause) => { paused = true; }
                             Some(Control::Resume) => { paused = false; }
-                            other => match self.apply(other, index, total).await {
-                                Some(Move::Goto(i)) => { index = i; continue 'tour; }
-                                Some(Move::End) | None => break 'tour,
-                            },
+                            other => {
+                                let last_next = other == Some(Control::Next) && index + 1 >= total;
+                                match self.apply(other, index, total).await {
+                                    Some(Move::Goto(i)) => { index = i; continue 'tour; }
+                                    // Next on the last step is "finish": he still sums up.
+                                    Some(Move::End) | None => { finished = last_next; break 'tour; }
+                                }
+                            }
                         }
                     }
                     _ = tick => {
                         if paused { continue; }
                         match gap_left {
-                            None => { if !self.is_busy().await { gap_left = Some(PAUSE_BETWEEN_STEPS); } }
+                            None => {
+                                if !self.is_busy().await {
+                                    if waits_for_person(pace, index, total) {
+                                        if !waiting {
+                                            waiting = true;
+                                            self.emit("tour:waiting", json!({"tour_id": tour_id, "index": index}));
+                                        }
+                                    } else {
+                                        gap_left = Some(PAUSE_BETWEEN_STEPS);
+                                    }
+                                }
+                            }
                             Some(left) => {
                                 if left <= Duration::from_millis(100) { break; }
                                 gap_left = Some(left - Duration::from_millis(100));
@@ -303,16 +390,28 @@ impl TourEngine {
             }
 
             if index + 1 >= total {
-                self.say(kind, "That's the tour.").await;
+                finished = true;
                 break;
             }
             index += 1;
         }
 
+        let recap = clean_recap(recap);
+        if finished {
+            let closing = if recap.is_empty() {
+                "That's the tour.".to_string()
+            } else {
+                format!("That's the tour. The thing to remember: {recap}")
+            };
+            self.say(kind, &closing).await;
+        }
         if navigate && self.hub.is_connected() {
             self.hub.send(json!({"type": "tour.end", "tour_id": tour_id}));
         }
-        self.emit("tour:end", json!({"agent_kind": kind, "tour_id": tour_id}));
+        self.emit("tour:end", json!({
+            "agent_kind": kind, "tour_id": tour_id, "finished": finished,
+            "recap": if finished { recap.as_str() } else { "" }
+        }));
         *self.control_tx.lock().await = None;
         tracing::info!("Tour '{title}' ended");
     }
@@ -355,13 +454,47 @@ mod tests {
 
     #[test]
     fn says_where_to_look_unless_the_narration_already_does() {
-        let step = |n: &str, s, e| TourStep { path: "C:\\p\\src\\login_form.ts".into(), start_line: s, end_line: e, narration: n.into() };
+        let step = |n: &str, s, e| TourStep { path: "C:\\p\\src\\login_form.ts".into(), start_line: s, end_line: e, title: String::new(), narration: n.into() };
         assert_eq!(where_phrase(&step("x", 12, 20)), "Look at lines 12 to 20 of login form dot ts.");
         assert_eq!(where_phrase(&step("x", 7, 7)), "Look at line 7 of login form dot ts.");
-        assert_eq!(spoken_step(&step("The check happens here.", 3, 4)), "Look at lines 3 to 4 of login form dot ts. The check happens here.");
-        assert_eq!(spoken_step(&step("In login_form.ts the password is hashed.", 3, 4)), "In login_form.ts the password is hashed.");
+        assert_eq!(spoken_step(&step("The check happens here.", 3, 4), false), "Look at lines 3 to 4 of login form dot ts. The check happens here.");
+        assert_eq!(spoken_step(&step("In login_form.ts the password is hashed.", 3, 4), false), "In login_form.ts the password is hashed.");
         // A common word that is also the file's stem must not count as naming the file.
-        assert!(spoken_step(&step("This is the login form.", 3, 4)).starts_with("Look at lines 3 to 4"));
+        assert!(spoken_step(&step("This is the login form.", 3, 4), false).starts_with("Look at lines 3 to 4"));
+    }
+
+    #[test]
+    fn when_vs_code_follows_along_the_highlight_says_where_so_he_does_not() {
+        let step = TourStep { path: "C:\\p\\src\\a.ts".into(), start_line: 3, end_line: 9, title: String::new(), narration: "The check happens here.".into() };
+        assert_eq!(spoken_step(&step, true), "The check happens here.");
+    }
+
+    #[test]
+    fn a_step_is_called_by_its_title_or_else_its_file() {
+        let step = |title: &str| TourStep { path: "C:\\p\\src\\login.ts".into(), start_line: 1, end_line: 2, title: title.into(), narration: "n".into() };
+        assert_eq!(step("Checking the password").label(), "Checking the password");
+        assert_eq!(step("  ").label(), "login.ts");
+        // Tours from agents have no titles at all.
+        let from_agent: TourStep = serde_json::from_str(r#"{"path":"a.ts","start_line":1,"end_line":2,"narration":"n"}"#).unwrap();
+        assert_eq!(from_agent.label(), "a.ts");
+    }
+
+    #[test]
+    fn the_recap_does_not_say_remember_twice() {
+        assert_eq!(clean_recap("Remember shape first, then secrets."), "Shape first, then secrets.");
+        assert_eq!(clean_recap("  remember that the ticket lasts 30 minutes. "), "The ticket lasts 30 minutes.");
+        assert_eq!(clean_recap("Remember: check twice."), "Check twice.");
+        assert_eq!(clean_recap("Words become sound one sentence at a time."), "Words become sound one sentence at a time.");
+        assert_eq!(clean_recap("   "), "");
+    }
+
+    #[test]
+    fn he_waits_for_the_person_between_steps_but_not_after_the_last() {
+        assert!(waits_for_person(TourPace::Wait, 0, 4));
+        assert!(waits_for_person(TourPace::Wait, 2, 4));
+        assert!(!waits_for_person(TourPace::Wait, 3, 4));
+        assert!(!waits_for_person(TourPace::Auto, 0, 4));
+        assert_eq!(TourPace::default(), TourPace::Wait);
     }
 
     #[test]
@@ -377,11 +510,12 @@ mod tests {
         std::fs::create_dir_all(&dir).unwrap();
         std::fs::write(dir.join("a.txt"), "1\n2\n3\n4\n5\n").unwrap();
         let roots = vec![dir.to_string_lossy().to_string()];
-        let step = |p: &str, s, e| TourStep { path: p.into(), start_line: s, end_line: e, narration: "n".into() };
+        let step = |p: &str, s, e| TourStep { path: p.into(), start_line: s, end_line: e, title: "t".into(), narration: "n".into() };
         let out = validate_steps(vec![step("a.txt", 0, 99), step("missing.txt", 1, 2), step("a.txt", 4, 2)], &roots);
         assert_eq!(out.len(), 2);
         assert_eq!((out[0].start_line, out[0].end_line), (1, 5));
         assert_eq!((out[1].start_line, out[1].end_line), (4, 4));
+        assert_eq!(out[0].title, "t");
         let many: Vec<_> = (0..20).map(|_| step("a.txt", 1, 1)).collect();
         assert_eq!(validate_steps(many, &roots).len(), MAX_STEPS);
     }

@@ -140,8 +140,18 @@ async fn client_loop(state: Arc<ServerState>, mut socket: WebSocket) {
                 match incoming {
                     Some(Ok(Message::Text(text))) => {
                         let Ok(msg) = serde_json::from_str::<Value>(text.as_str()) else { continue };
-                        match hub.handle_message(&msg) {
-                            Inbound::Control(c) => state.tours.control(c).await,
+                        let inbound = hub.handle_message(&msg);
+                        if msg.get("type").and_then(Value::as_str) == Some("editor.context") {
+                            crate::look::on_context(&state, &msg);
+                        }
+                        match inbound {
+                            Inbound::Control(c) => {
+                                // "Stop" (Alt+Escape in VS Code) also ends look mode.
+                                if c == Control::Stop {
+                                    crate::look::set(&state, false, "cancelled");
+                                }
+                                state.tours.control(c).await
+                            }
                             Inbound::Ask(q) if !q.trim().is_empty() => {
                                 let st = state.clone();
                                 tokio::spawn(async move { crate::brain::ask_and_present(st, q).await; });
@@ -156,7 +166,10 @@ async fn client_loop(state: Arc<ServerState>, mut socket: WebSocket) {
         }
     }
 
-    hub.clients.fetch_sub(1, Ordering::SeqCst);
+    if hub.clients.fetch_sub(1, Ordering::SeqCst) == 1 {
+        // Nothing left to look at.
+        crate::look::set(&state, false, "disconnected");
+    }
     tracing::info!("VS Code disconnected");
 }
 
