@@ -2,7 +2,7 @@
   "name": "barnaby-vscode",
   "displayName": "Barnaby",
   "description": "Lets the Barnaby desktop pet walk you through your code: opens files, scrolls and highlights as it talks.",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "icon": "icon.png",
   "publisher": "barnaby",
   "private": true,
@@ -16,7 +16,8 @@
       { "command": "barnaby.ask", "title": "Barnaby: Ask about this" },
       { "command": "barnaby.next", "title": "Barnaby: Next step" },
       { "command": "barnaby.previous", "title": "Barnaby: Previous step" },
-      { "command": "barnaby.stop", "title": "Barnaby: Stop tour" }
+      { "command": "barnaby.stop", "title": "Barnaby: Stop tour" },
+      { "command": "barnaby.showLog", "title": "Barnaby: Show log" }
     ],
     "keybindings": [
       { "command": "barnaby.next", "key": "alt+]" },

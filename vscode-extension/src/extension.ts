@@ -28,19 +28,36 @@ let socket: WebSocket | undefined;
 let reconnectTimer: NodeJS.Timeout | undefined;
 let contextTimer: NodeJS.Timeout | undefined;
 let statusItem: vscode.StatusBarItem;
+let log: vscode.LogOutputChannel;
 let decoration: vscode.TextEditorDecorationType | undefined;
 let stopped = false;
+/** The last problem written to the log, so a retry every 3 s does not repeat itself. */
+let lastProblem = "";
+
+function problem(message: string): void {
+  if (message === lastProblem) return;
+  lastProblem = message;
+  log.warn(message);
+}
+
+/** Where Barnaby keeps its config. APPDATA first; the default location if that is missing or unreadable. */
+function configPaths(): string[] {
+  const roaming = path.join(os.homedir(), "AppData", "Roaming");
+  const dirs = [process.env.APPDATA ?? roaming, roaming];
+  return [...new Set(dirs)].map((d) => path.join(d, "Barnaby", "config.json"));
+}
 
 function readConfig(): BarnabyConfig | undefined {
-  const appData = process.env.APPDATA ?? path.join(os.homedir(), "AppData", "Roaming");
-  try {
-    const raw = fs.readFileSync(path.join(appData, "Barnaby", "config.json"), "utf8");
-    const cfg = JSON.parse(raw);
-    if (typeof cfg.port === "number" && typeof cfg.token === "string") {
-      return { port: cfg.port, token: cfg.token };
+  for (const file of configPaths()) {
+    try {
+      const cfg = JSON.parse(fs.readFileSync(file, "utf8"));
+      if (typeof cfg.port === "number" && typeof cfg.token === "string") {
+        return { port: cfg.port, token: cfg.token };
+      }
+      problem(`${file} has no port and token.`);
+    } catch (e) {
+      problem(`Could not read ${file}: ${(e as Error).message}`);
     }
-  } catch {
-    // Barnaby has not run yet, so there is no config. The status bar says so.
   }
   return undefined;
 }
@@ -48,7 +65,8 @@ function readConfig(): BarnabyConfig | undefined {
 function setStatus(connected: boolean, detail?: string): void {
   statusItem.text = "$(hubot) Barnaby";
   statusItem.color = connected ? new vscode.ThemeColor("charts.green") : new vscode.ThemeColor("disabledForeground");
-  statusItem.tooltip = connected ? "Barnaby is connected" : (detail ?? "Barnaby is not running");
+  statusItem.tooltip = connected ? "Barnaby is connected" : `${detail ?? "Barnaby is not running"} (click to see the log)`;
+  statusItem.command = connected ? "barnaby.ask" : "barnaby.showLog";
 }
 
 function send(msg: object): void {
@@ -76,6 +94,8 @@ function connect(): void {
   socket = ws;
 
   ws.on("open", () => {
+    lastProblem = "";
+    log.info(`Connected to Barnaby on port ${cfg.port}`);
     setStatus(true);
     send({
       type: "hello",
@@ -91,13 +111,18 @@ function connect(): void {
       console.error("Barnaby: bad message", e);
     }
   });
-  ws.on("close", () => {
-    setStatus(false);
+  ws.on("close", (code) => {
+    if (lastProblem === "") log.info(`Connection to Barnaby closed (${code})`);
+    setStatus(false, lastProblem || undefined);
     if (socket === ws) socket = undefined;
     scheduleReconnect();
   });
-  ws.on("error", () => {
+  ws.on("unexpected-response", (_req, res) => {
+    problem(`Barnaby refused the connection (HTTP ${res.statusCode}). Is the token in ${configPaths()[0]} current?`);
+  });
+  ws.on("error", (e) => {
     // 'close' follows and reconnects.
+    problem(`Cannot reach Barnaby on port ${cfg.port}: ${e.message}`);
   });
 }
 
@@ -198,13 +223,16 @@ function control(action: "next" | "back" | "stop"): void {
 
 export function activate(context: vscode.ExtensionContext): void {
   stopped = false;
+  log = vscode.window.createOutputChannel("Barnaby", { log: true });
+  log.info(`Barnaby extension started (VS Code ${vscode.version})`);
   statusItem = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Right, 100);
-  statusItem.command = "barnaby.ask";
   setStatus(false);
   statusItem.show();
 
   context.subscriptions.push(
     statusItem,
+    log,
+    vscode.commands.registerCommand("barnaby.showLog", () => log.show(true)),
     vscode.commands.registerCommand("barnaby.ask", async () => {
       const question = await vscode.window.showInputBox({ prompt: "Ask Barnaby about your code" });
       if (question?.trim()) {
