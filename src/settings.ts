@@ -98,6 +98,17 @@ export function initSettingsView(container: HTMLElement): void {
           </div>
         </section>
 
+        <!-- Tours -->
+        <section class="settings-card">
+          <label class="card-title">Tours</label>
+          <p class="card-desc">Barnaby always says where to look. You choose whether he also moves VS Code for you.</p>
+          <div class="form-row">
+            <label for="tour-navigate">Open files and highlight lines in VS Code:</label>
+            <input type="checkbox" id="tour-navigate" checked />
+          </div>
+          <span id="tour-navigate-msg" class="status-msg"></span>
+        </section>
+
         <!-- Brain: Meta API key -->
         <section class="settings-card">
           <label class="card-title">Brain (Muse Spark)</label>
@@ -170,6 +181,9 @@ export function initSettingsView(container: HTMLElement): void {
       if (barnabySel && voices["barnaby"]) barnabySel.value = voices["barnaby"];
       if (otherSel && voices["other"]) otherSel.value = voices["other"];
 
+      const navToggle = document.getElementById("tour-navigate") as HTMLInputElement | null;
+      if (navToggle) navToggle.checked = cfg.tour?.navigate ?? true;
+
       // Render projects
       const list = document.getElementById("projects-list");
       if (list && cfg.projects.length > 0) {
@@ -207,6 +221,29 @@ export function initSettingsView(container: HTMLElement): void {
   bindVoiceSelect("voice-gemini", "gemini-cli");
   bindVoiceSelect("voice-barnaby", "barnaby");
   bindVoiceSelect("voice-other", "other");
+
+  // Tours: move VS Code, or only say where to look
+  const navToggle = document.getElementById("tour-navigate") as HTMLInputElement | null;
+  const navMsg = document.getElementById("tour-navigate-msg");
+  navToggle?.addEventListener("change", () => {
+    invoke("set_tour_navigate", { navigate: navToggle.checked })
+      .then(() => {
+        if (navMsg) navMsg.textContent = navToggle.checked ? "Barnaby will open files and highlight lines." : "Barnaby will only tell you where to look.";
+      })
+      .catch((e) => {
+        if (navMsg) navMsg.textContent = `${e}`;
+      });
+  });
+
+  // Hear the chosen voice
+  const hearBtn = document.createElement("button");
+  hearBtn.className = "btn btn-secondary btn-sm";
+  hearBtn.textContent = "Hear";
+  hearBtn.addEventListener("click", () => {
+    const sel = document.getElementById("voice-barnaby") as HTMLSelectElement | null;
+    if (sel) invoke("preview_voice", { voice: sel.value }).catch((e) => alert(`${e}`));
+  });
+  document.getElementById("voice-barnaby")?.after(hearBtn);
 
   // Phonon Status Poller & Action Renderer
   const updatePhononUI = (info: PhononStatusInfo) => {
