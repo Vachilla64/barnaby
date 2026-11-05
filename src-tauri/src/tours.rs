@@ -101,13 +101,16 @@ pub fn where_phrase(step: &TourStep) -> String {
     format!("Look at {lines} of {}.", spoken_file(&step.path))
 }
 
-/// The narration, with the location in front unless the narration already names the file.
+/// The narration, with the location in front unless the narration already names the file
+/// (the full name, like "login.ts", or the way it is said, like "login dot ts").
 pub fn spoken_step(step: &TourStep) -> String {
-    let stem = Path::new(&step.path)
-        .file_stem()
+    let name = Path::new(&step.path)
+        .file_name()
         .map(|s| s.to_string_lossy().to_lowercase())
         .unwrap_or_default();
-    if !stem.is_empty() && step.narration.to_lowercase().contains(&stem) {
+    let narration = step.narration.to_lowercase();
+    let names_file = !name.is_empty() && (narration.contains(&name) || narration.contains(&spoken_file(&step.path).to_lowercase()));
+    if names_file {
         step.narration.clone()
     } else {
         format!("{} {}", where_phrase(step), step.narration)
@@ -356,7 +359,9 @@ mod tests {
         assert_eq!(where_phrase(&step("x", 12, 20)), "Look at lines 12 to 20 of login form dot ts.");
         assert_eq!(where_phrase(&step("x", 7, 7)), "Look at line 7 of login form dot ts.");
         assert_eq!(spoken_step(&step("The check happens here.", 3, 4)), "Look at lines 3 to 4 of login form dot ts. The check happens here.");
-        assert_eq!(spoken_step(&step("In login_form the password is hashed.", 3, 4)), "In login_form the password is hashed.");
+        assert_eq!(spoken_step(&step("In login_form.ts the password is hashed.", 3, 4)), "In login_form.ts the password is hashed.");
+        // A common word that is also the file's stem must not count as naming the file.
+        assert!(spoken_step(&step("This is the login form.", 3, 4)).starts_with("Look at lines 3 to 4"));
     }
 
     #[test]
