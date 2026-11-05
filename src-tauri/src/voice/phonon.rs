@@ -382,21 +382,23 @@ impl PhononManager {
         Err("Could not locate resources/phonon/phonon_server.py".into())
     }
 
-    /// Synthesize speech via POST /tts (streamed WAV)
-    pub async fn synthesize(&self, text: &str, voice: &str) -> Result<Vec<u8>, String> {
+    /// Start synthesis via POST /tts and return as soon as the WAV header has arrived. The audio
+    /// keeps flowing into the returned stream while it is generated, so playback can begin on the
+    /// first chunk instead of after the whole sentence.
+    pub async fn synthesize_stream(&self, text: &str, voice: &str) -> Result<PcmStream, String> {
         let trimmed = text.trim();
         if trimmed.is_empty() {
             return Err("Empty text for synthesis".into());
         }
 
-        let voice_name = if voice.is_empty() { "Toby" } else { voice };
+        let voice_name = if voice.is_empty() { crate::config::DEFAULT_VOICE } else { voice };
 
         let form_params = [
             ("text", trimmed),
             ("voice_url", voice_name),
         ];
 
-        let resp = self
+        let mut resp = self
             .client
             .post(PHONON_TTS_URL)
             .form(&form_params)
@@ -410,12 +412,48 @@ impl PhononManager {
             return Err(format!("Phonon synthesis failed ({}): {}", status, err_body));
         }
 
-        let bytes = resp
-            .bytes()
-            .await
-            .map_err(|e| format!("Failed reading audio bytes from Phonon: {}", e))?;
+        // The body starts with a WAV header, then raw 16-bit samples until the server is done.
+        let mut head: Vec<u8> = Vec::new();
+        let (sample_rate, first_bytes) = loop {
+            match resp.chunk().await {
+                Ok(Some(c)) => head.extend_from_slice(&c),
+                Ok(None) => return Err("Phonon ended the audio before sending a WAV header".into()),
+                Err(e) => return Err(format!("Failed reading audio from Phonon: {e}")),
+            }
+            if let Some((rate, data_offset)) = parse_wav_header(&head)? {
+                break (rate, head[data_offset..].to_vec());
+            }
+        };
 
-        Ok(fix_wav_header(bytes.to_vec()))
+        let (tx, rx) = std::sync::mpsc::channel::<Vec<i16>>();
+        tokio::spawn(async move {
+            let mut bytes = first_bytes;
+            loop {
+                // Send every complete sample; keep a stray odd byte for the next chunk.
+                let whole = bytes.len() / 2 * 2;
+                if whole > 0 {
+                    let samples: Vec<i16> = bytes[..whole]
+                        .chunks_exact(2)
+                        .map(|p| i16::from_le_bytes([p[0], p[1]]))
+                        .collect();
+                    bytes.drain(..whole);
+                    // The player dropped the stream (cancelled): stop pulling audio.
+                    if tx.send(samples).is_err() {
+                        return;
+                    }
+                }
+                match resp.chunk().await {
+                    Ok(Some(c)) => bytes.extend_from_slice(&c),
+                    Ok(None) => return,
+                    Err(e) => {
+                        tracing::warn!("Phonon audio stream broke mid-sentence: {e}");
+                        return;
+                    }
+                }
+            }
+        });
+
+        Ok(PcmStream { sample_rate, rx })
     }
 
     pub fn stop(&self) {
@@ -428,34 +466,56 @@ impl PhononManager {
     }
 }
 
-/// Phonon streams a WAV of unknown length, so its header holds the maximum size (0xFFFFFFFF).
-/// Decoders reject that. Once the whole body is in memory, write the real sizes.
-pub fn fix_wav_header(mut wav: Vec<u8>) -> Vec<u8> {
-    if wav.len() < 12 || &wav[0..4] != b"RIFF" || &wav[8..12] != b"WAVE" {
-        return wav;
+/// Audio on its way from Phonon: mono 16-bit samples at `sample_rate`. The channel closes when
+/// synthesis ends, or breaks.
+pub struct PcmStream {
+    pub sample_rate: u32,
+    pub rx: std::sync::mpsc::Receiver<Vec<i16>>,
+}
+
+/// Read the WAV header Phonon streams ahead of the samples. Its data length is "unknown" (all ones),
+/// so we do not trust sizes: just find the `fmt ` chunk, then where the `data` chunk starts.
+/// `Ok(None)` means more bytes are needed. Returns (sample rate, offset of the first sample).
+fn parse_wav_header(buf: &[u8]) -> Result<Option<(u32, usize)>, String> {
+    if buf.len() < 12 {
+        return Ok(None);
     }
-    let riff_size = (wav.len() - 8) as u32;
-    wav[4..8].copy_from_slice(&riff_size.to_le_bytes());
+    if &buf[0..4] != b"RIFF" || &buf[8..12] != b"WAVE" {
+        return Err("Phonon sent audio that is not a WAV file".into());
+    }
     let mut pos = 12;
-    while pos + 8 <= wav.len() {
-        let id = [wav[pos], wav[pos + 1], wav[pos + 2], wav[pos + 3]];
-        let size = u32::from_le_bytes([wav[pos + 4], wav[pos + 5], wav[pos + 6], wav[pos + 7]]) as usize;
-        if &id == b"data" {
-            let real = (wav.len() - (pos + 8)) as u32;
-            wav[pos + 4..pos + 8].copy_from_slice(&real.to_le_bytes());
-            break;
+    let mut rate = None;
+    while pos + 8 <= buf.len() {
+        let id = &buf[pos..pos + 4];
+        let size = u32::from_le_bytes([buf[pos + 4], buf[pos + 5], buf[pos + 6], buf[pos + 7]]) as usize;
+        if id == b"data" {
+            return match rate {
+                Some(r) => Ok(Some((r, pos + 8))),
+                None => Err("WAV data came before its format chunk".into()),
+            };
+        }
+        if id == b"fmt " {
+            if buf.len() < pos + 8 + 16 {
+                return Ok(None);
+            }
+            let f = &buf[pos + 8..];
+            let channels = u16::from_le_bytes([f[2], f[3]]);
+            let bits = u16::from_le_bytes([f[14], f[15]]);
+            if channels != 1 || bits != 16 {
+                return Err(format!("Unsupported Phonon audio: {channels} channels, {bits} bits"));
+            }
+            rate = Some(u32::from_le_bytes([f[4], f[5], f[6], f[7]]));
         }
         pos += 8 + size;
     }
-    wav
+    Ok(None)
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    #[test]
-    fn fixes_unknown_length_wav_header() {
+    fn streamed_header() -> Vec<u8> {
         let mut wav = Vec::new();
         wav.extend_from_slice(b"RIFF");
         wav.extend_from_slice(&u32::MAX.to_le_bytes());
@@ -464,16 +524,31 @@ mod tests {
         wav.extend_from_slice(&[1, 0, 1, 0, 0xC0, 0x5D, 0, 0, 0x80, 0xBB, 0, 0, 2, 0, 16, 0]);
         wav.extend_from_slice(b"data");
         wav.extend_from_slice(&u32::MAX.to_le_bytes());
-        wav.extend_from_slice(&[0u8; 100]);
-        let total = wav.len();
-        let fixed = fix_wav_header(wav);
-        assert_eq!(u32::from_le_bytes(fixed[4..8].try_into().unwrap()) as usize, total - 8);
-        assert_eq!(u32::from_le_bytes(fixed[40..44].try_into().unwrap()), 100);
+        wav
     }
 
     #[test]
-    fn leaves_non_wav_alone() {
-        assert_eq!(fix_wav_header(vec![1, 2, 3]), vec![1, 2, 3]);
+    fn reads_rate_and_data_offset_from_unknown_length_header() {
+        let mut wav = streamed_header();
+        assert_eq!(parse_wav_header(&wav).unwrap(), Some((24000, 44)));
+        wav.extend_from_slice(&[0u8; 100]);
+        assert_eq!(parse_wav_header(&wav).unwrap(), Some((24000, 44)));
+    }
+
+    #[test]
+    fn asks_for_more_bytes_when_header_is_incomplete() {
+        let wav = streamed_header();
+        assert_eq!(parse_wav_header(&wav[..10]).unwrap(), None);
+        assert_eq!(parse_wav_header(&wav[..30]).unwrap(), None);
+        assert_eq!(parse_wav_header(&wav[..43]).unwrap(), None);
+    }
+
+    #[test]
+    fn rejects_non_wav_and_unsupported_formats() {
+        assert!(parse_wav_header(b"{\"error\": \"nope\"}   ").is_err());
+        let mut stereo = streamed_header();
+        stereo[22] = 2;
+        assert!(parse_wav_header(&stereo).is_err());
     }
 }
 

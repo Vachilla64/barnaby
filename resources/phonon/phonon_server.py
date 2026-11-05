@@ -29,7 +29,7 @@ PORT = int(os.environ.get("PHONON_PORT", "8001"))
 MODEL = os.environ.get("PHONON_MODEL", "hf://gradium/phonon-31m-en")
 QUANT = os.environ.get("PHONON_QUANT", "q8_0")
 THREADS = int(os.environ.get("PHONON_THREADS", "2"))
-DEFAULT_VOICE = os.environ.get("PHONON_VOICE", "Freya")
+DEFAULT_VOICE = os.environ.get("PHONON_VOICE", "Sir Bramwell")
 GAIN = float(os.environ.get("PHONON_GAIN", "2.5"))  # Phonon is quiet (peak 0.45); the soft limit below keeps louder peaks from clipping
 
 _tts = None

@@ -1,4 +1,4 @@
-use super::phonon::PhononManager;
+use super::phonon::{PcmStream, PhononManager};
 use super::playback::AudioPlayer;
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, VecDeque};
@@ -40,6 +40,8 @@ pub struct SpeechRequest {
 pub struct SpeechStartEvent {
     pub agent_id: String,
     pub sentence: String,
+    /// What kind of speech this is, so the page can leave answers to the chat list.
+    pub kind: SpeechKind,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -211,6 +213,7 @@ struct QueuedItem {
     sentence: String,
     priority: Priority,
     voice: String,
+    kind: SpeechKind,
 }
 
 struct QueueState {
@@ -283,7 +286,7 @@ impl SpeechQueue {
             return;
         }
 
-        let voice = req.voice.unwrap_or_else(|| "Toby".to_string());
+        let voice = req.voice.unwrap_or_else(|| crate::config::DEFAULT_VOICE.to_string());
 
         let mut st = self.state.lock().await;
 
@@ -305,6 +308,7 @@ impl SpeechQueue {
                 sentence,
                 priority: req.priority,
                 voice: voice.clone(),
+                kind: req.kind,
             });
         }
 
@@ -343,7 +347,7 @@ impl SpeechQueue {
         let queue_clone = self.clone();
 
         tokio::spawn(async move {
-            let mut prefetched: Option<(QueuedItem, Result<Vec<u8>, String>)> = None;
+            let mut prefetched: Option<(QueuedItem, Result<PcmStream, String>)> = None;
 
             loop {
                 // Fetch next item from queue if not already prefetched
@@ -361,7 +365,7 @@ impl SpeechQueue {
                         drop(st);
 
                         // Synthesize current item
-                        let audio = queue_clone.phonon.synthesize(&item.sentence, &item.voice).await;
+                        let audio = queue_clone.phonon.synthesize_stream(&item.sentence, &item.voice).await;
                         Some((item, audio))
                     } else {
                         st.is_playing = false;
@@ -387,6 +391,7 @@ impl SpeechQueue {
                         SpeechStartEvent {
                             agent_id: item.agent_id.clone(),
                             sentence: item.sentence.clone(),
+                            kind: item.kind,
                         },
                     );
                 }
@@ -399,13 +404,14 @@ impl SpeechQueue {
                         sentence: it.sentence.clone(),
                         priority: it.priority,
                         voice: it.voice.clone(),
+                        kind: it.kind,
                     })
                 };
 
                 let prefetch_handle = if let Some(next_it) = next_in_queue {
                     let phonon = queue_clone.phonon.clone();
                     Some(tokio::spawn(async move {
-                        let audio = phonon.synthesize(&next_it.sentence, &next_it.voice).await;
+                        let audio = phonon.synthesize_stream(&next_it.sentence, &next_it.voice).await;
                         (next_it, audio)
                     }))
                 } else {
@@ -414,8 +420,8 @@ impl SpeechQueue {
 
                 // Play sentence N
                 match audio_res {
-                    Ok(wav_bytes) => {
-                        let done_rx = queue_clone.player.play(wav_bytes, cancel_token.clone());
+                    Ok(stream) => {
+                        let done_rx = queue_clone.player.play(stream, cancel_token.clone());
                         let _ = done_rx.await;
                     }
                     Err(e) => {
