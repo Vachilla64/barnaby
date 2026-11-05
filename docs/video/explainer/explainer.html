@@ -16,17 +16,22 @@ svg.lines{position:absolute;inset:0}
 </style></head><body>
 <div class="grid"></div>
 
+<!-- SP problem -->
+<div id="sp" class="abs" style="inset:0">
+  <div class="abs" id="wall" style="left:60px;top:90px;right:60px;bottom:90px;font-size:17px;line-height:1.5;color:#c3ced6;white-space:pre;overflow:hidden;filter:blur(1.2px)"></div>
+  <div class="abs" style="left:0;right:0;top:215px;text-align:center;font-size:76px;font-weight:bold;background:linear-gradient(transparent,#fff 20%,#fff 80%,transparent);padding:26px 0" id="pt">You vibe coded it.<br><span style="color:#d9482b" id="pt2">Do you understand it?</span></div>
+</div>
 <!-- S1 intro -->
 <div id="s1" class="abs" style="inset:0">
-  <div class="abs" style="left:0;right:0;top:110px;text-align:center;font-size:30px;color:#0a8a9a;letter-spacing:.2em">INTRODUCING</div>
+  <div class="abs" style="left:0;right:0;top:110px;text-align:center;font-size:30px;color:#0a8a9a;letter-spacing:.2em">SO WE MADE</div>
   <div class="abs" style="left:0;right:0;top:160px;text-align:center;font-size:110px;font-weight:bold">Meet Barnaby</div>
-  <div class="abs" style="left:0;right:0;top:310px;text-align:center;font-size:28px;color:#3a4b58">A desktop pet that speaks for your coding agents.</div>
+  <div class="abs" style="left:0;right:0;top:310px;text-align:center;font-size:28px;color:#3a4b58">He walks you through your own code, out loud.</div>
   <img id="b1" class="abs px" src="../../../site/barnaby.svg" style="left:565px;top:365px;height:230px">
 </div>
 
 <!-- S2 diagram -->
 <div id="s2" class="abs" style="inset:0">
-  <div class="abs" style="left:0;right:0;top:34px;text-align:center;font-size:30px;font-weight:bold">Agents work in a terminal. Barnaby tells you.</div>
+  <div class="abs" style="left:0;right:0;top:34px;text-align:center;font-size:30px;font-weight:bold">And any coding agent can give you updates through him.</div>
   <svg class="lines" id="lines" viewBox="0 0 1280 720">
     <g stroke="#14202b" stroke-width="3" fill="none">
       <path id="p1" d="M330 165 H470 V350 H520"/>
@@ -73,6 +78,15 @@ svg.lines{position:absolute;inset:0}
   <div class="abs" id="say" style="left:330px;top:360px;width:390px;background:#fff;border:2px solid #14202b;padding:10px 14px;font-size:21px;box-shadow:5px 5px 0 #14202b">"Look at lines 2 and 3 of the login file."</div>
 </div>
 
+<!-- SQ personality -->
+<div id="sq" class="abs" style="inset:0">
+  <div class="abs" style="left:0;right:0;top:34px;text-align:center;font-size:30px;font-weight:bold">He is a character, not a chat box.</div>
+  <img id="bq" class="abs px" src="../../../site/barnaby.svg" style="left:540px;top:150px;height:400px">
+  <div class="box" id="q1" style="left:90px;top:190px;width:380px;font-size:19px">British gentleman's voice</div>
+  <div class="box" id="q2" style="left:90px;top:330px;width:380px;font-size:19px">Panics when you pick him up</div>
+  <div class="box" id="q3" style="left:90px;top:470px;width:380px;font-size:19px">Falls, bounces, tips his hat</div>
+  <div class="box" id="q4" style="left:830px;top:260px;width:360px;font-size:19px">Turns his back and points during a tour</div>
+</div>
 <!-- S4 end -->
 <div id="s4" class="abs" style="inset:0">
   <img id="b4" class="abs px" src="../../../site/barnaby.svg" style="left:560px;top:90px;height:300px">
@@ -87,37 +101,45 @@ const $=id=>document.getElementById(id);
 const clamp=(x,a=0,b=1)=>Math.min(b,Math.max(a,x));
 const ease=x=>1-Math.pow(1-clamp(x),3);
 const win=(t,a,b,f=.4)=>Math.min(clamp((t-a)/f),clamp((b-t)/f));
-const caps=[[0.6,4,"Meet Barnaby."],[4.2,9.5,"Coding agents talk to Barnaby over MCP."],[9.5,15,"He tells you what they are doing, out loud."],[15.5,21,"Ask a question. Muse Spark reads your project."],[21,26,"He says where to look. VS Code can follow."],[26.5,30,"Meet Barnaby."]];
+const caps=[[0.5,4.8,"Code from an AI agent runs. But do you know how it works?"],[5.2,9,"Barnaby walks you through it."],[10,14.5,"Ask about your own project, typed or spoken."],[15,19.6,"He says where to look. VS Code can follow."],[20.3,25.2,"And he has a personality."],[26,32,"Any agent that speaks MCP can talk to him."],[32.5,37,"He tells you out loud when an agent is done."]];
+const wall=$('wall');
+wall.textContent=Array.from({length:30},(_,i)=>["function handle(req, res) {","  const user = await db.find(req.id)","  if (!user) return res.status(401)","  const token = sign(user, SECRET)","  cache.set(token, user.id)","}","export const routes = [auth, pay, sync]"][i%7]+"   // ???").join("\n");
 const dots=$('dots');
 for(let i=0;i<14;i++){const c=document.createElementNS('http://www.w3.org/2000/svg','circle');c.setAttribute('r',7);dots.appendChild(c)}
 const paths=['p1','p2','p3','p4','p5'].map(i=>$(i)), p6=$('p6');
-window.setT=function(t){
- $('s1').style.opacity=win(t,0,4.2,.5)*1; if(t<.5)$('s1').style.opacity=ease(t/.5);
- const b1=$('b1');b1.style.transform=`translateY(${(1-ease((t-.2)/.8))*60 + Math.abs(Math.sin(t*3))*-6}px)`;
+function fSP(t){ $('sp').style.opacity=win(t,0,5,.5); $('pt2').style.opacity=ease((t-1.6)/.5); $('wall').style.transform=`translateY(${-t*8}px)`; }
+function fS1(t){ // t local 0..4
+ $('s1').style.opacity=win(t,0,4,.4); $('b1').style.transform=`translateY(${(1-ease((t-.1)/.6))*60 + Math.abs(Math.sin(t*3))*-6}px)`; }
+function fS3(t){ // original absolute times 15.4..26.2
+ $('s3').style.opacity=win(t,15.4,19.8+6.4,.5);
+ const full="How does login work? Show me.";const n=Math.floor(clamp((t-16)/1.6)*full.length);$('q').textContent=full.slice(0,n)+(n<full.length?'▌':'');
+ $('q').style.opacity=ease((t-15.8)/.3);
+ $('arr1').style.opacity=ease((t-17.8)/.3);$('ms').style.opacity=ease((t-18)/.4);$('fold').style.opacity=ease((t-18.8)/.4);
+ $('b3').style.opacity=ease((t-19.5)/.5);$('b3').style.transform=`scaleX(-1) translateY(${Math.sin(t*4)*-3}px)`;
+ $('say').style.opacity=ease((t-21)/.4);$('code').style.opacity=ease((t-21.5)/.4);$('vs').style.opacity=ease((t-21.5)/.4);
+ const h=ease((t-22.5)/.3);['l2','l3'].forEach(i=>{$(i).className=h>.5?'hl':''});}
+function fSQ(t){ $('sq').style.opacity=win(t,0,5.2,.5); $('bq').style.transform=`translateY(${Math.abs(Math.sin(t*3))*-14}px)`;
+ ['q1','q2','q3','q4'].forEach((id,i)=>{const k=ease((t-.6-i*.7)/.4);$(id).style.opacity=k;$(id).style.transform=`translateX(${(1-k)*(i==3?40:-40)}px)`});}
+function fS2(t){ // original diagram times 4..15.6
  $('s2').style.opacity=win(t,4,15.6,.5);
- // reveal agents
  ['a1','a2','a3','a4','a5'].forEach((id,i)=>{const e=$(id);const k=ease((t-4.4-i*.35)/.5);e.style.opacity=k;e.style.transform=`translateX(${(1-k)*-40}px)`});
  paths.forEach((p,i)=>{const L=p.getTotalLength();const k=clamp((t-5.2-i*.3)/.9);p.style.strokeDasharray=p.getAttribute('stroke-dasharray')?p.getAttribute('stroke-dasharray'):L;if(!p.getAttribute('stroke-dasharray'))p.style.strokeDashoffset=L*(1-k);p.style.opacity=k});
  $('mcpt').style.opacity=ease((t-5.5)/.4);
  const kb=ease((t-4.6)/.6);$('plate').style.opacity=kb;$('b2').style.opacity=kb;$('bl').style.opacity=ease((t-6.2)/.5);
  $('b2').style.transform=`translateY(${Math.sin(t*4)*-4}px)`;
  $('dashnote').style.opacity=ease((t-7)/.5);
- // packets
  [...dots.children].forEach((c,j)=>{const i=j%5;const p=paths[i];const L=p.getTotalLength();const ph=((t-7.2-i*.5-Math.floor(j/5)*1.6)/1.8);if(ph<0||ph>1||t>15){c.setAttribute('r',0);return}const pt=p.getPointAtLength(L*ph);c.setAttribute('cx',pt.x);c.setAttribute('cy',pt.y);c.setAttribute('r',7)});
- const k6=clamp((t-9.5)/.8);p6.style.opacity=k6;
- const ky=ease((t-9.3)/.5);$('you').style.opacity=ky;
- $('bub').style.opacity=ease((t-10.5)/.4);$('bub').style.transform=`scale(${.9+.1*ease((t-10.5)/.4)})`;
- // S3
- $('s3').style.opacity=win(t,15.4,26.2,.5);
- const full="How does login work? Show me.";const n=Math.floor(clamp((t-16)/1.6)*full.length);$('q').textContent=full.slice(0,n)+(n<full.length?'▌':'');
- $('q').style.opacity=ease((t-15.8)/.3);
- $('arr1').style.opacity=ease((t-17.8)/.3);$('ms').style.opacity=ease((t-18)/.4);$('fold').style.opacity=ease((t-18.8)/.4);
- $('b3').style.opacity=ease((t-19.5)/.5);$('b3').style.transform=`scaleX(-1) translateY(${Math.sin(t*4)*-3}px)`;
- $('say').style.opacity=ease((t-21)/.4);$('code').style.opacity=ease((t-21.5)/.4);$('vs').style.opacity=ease((t-21.5)/.4);
- const h=ease((t-22.5)/.3);['l2','l3'].forEach(i=>{$(i).className=h>.5?'hl':''});
- // S4
- $('s4').style.opacity=ease((t-26.2)/.5);$('b4').style.transform=`translateY(${Math.abs(Math.sin(t*3))*-8}px)`;
- // captions
+ p6.style.opacity=clamp((t-9.5)/.8);
+ $('you').style.opacity=ease((t-9.3)/.5);
+ $('bub').style.opacity=ease((t-10.5)/.4);$('bub').style.transform=`scale(${.9+.1*ease((t-10.5)/.4)})`;}
+function fS4(t){ $('s4').style.opacity=ease(t/.5);$('b4').style.transform=`translateY(${Math.abs(Math.sin(t*3))*-8}px)`;}
+window.setT=function(t){
+ fSP(t);
+ fS1(t-5.0);
+ fS3(t+6.4-0);   // scene starts at t=9.4 -> local 15.8 ... windows below
+ fSQ(t-20.2);
+ fS2(t-21.8);
+ fS4(t-37.4);
  const c=caps.find(c=>t>=c[0]&&t<c[1]);$('cap').style.opacity=c?1:0;if(c)$('capt').textContent=c[2];
 };
 setT(0);
