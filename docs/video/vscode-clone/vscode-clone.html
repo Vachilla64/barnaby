@@ -40,4 +40,43 @@ const q=new URLSearchParams(location.search).get('s')||'A';
 if(q=='A')show('login.ts','a',[['login.ts',1]],'login.ts - demo-project - Visual Studio Code','src > login.ts > handleLogin','STEP 1 OF 6','“Look at lines 11 to 13 of login dot t s. This is where login starts.”',[[8,6]]);
 if(q=='B')show('validate.ts','half',[['login.ts',0],['validate.ts',1]],'validate.ts - demo-project - Visual Studio Code','src > auth > validate.ts','STEP 2 OF 6','“Next, validate dot t s...”',[[8,6]]);
 if(q=='C')show('validate.ts','a',[['login.ts',0],['validate.ts',1]],'validate.ts - demo-project - Visual Studio Code','src > auth > validate.ts > validateCredentials','STEP 2 OF 6','“Look at lines 14 to 18 of validate dot t s. It checks the email before anyone is looked up.”',[[8,6]]);
+
+// ---- animation: setT(t) draws the tour at time t (seconds). Used for the video render.
+const $=id=>document.getElementById(id);
+const clamp=(x,a=0,b=1)=>Math.min(b,Math.max(a,x));
+const ease=x=>x*x*(3-2*x);
+let mounted=null,rowEls=[];
+function mount(file){
+  if(mounted===file)return;mounted=file;
+  $('body').innerHTML=D.editors[file].a+'<div class="ruler"><div class="rmark" id="rm" style="top:8px;height:6px"></div></div>';
+  rowEls=[...document.querySelectorAll('.ln')];
+  rowEls.forEach(r=>{r.style.background='';const d=r.querySelector('.dot');if(d)d.remove()});
+}
+function paint(range,alpha){
+  rowEls.forEach((r,i)=>{const n=i+1;const on=range&&n>=range[0]&&n<=range[1];
+    r.style.background=on?`rgba(55,230,245,${alpha})`:'';
+    const g=r.querySelector('.gut');g.innerHTML=on&&alpha>.02?`<span class="dot" style="opacity:${clamp(alpha/.22)}"></span>`:'';});
+  const rm=$('rm');if(rm)rm.style.opacity=clamp(alpha/.22);
+}
+const SAY1='\u201cLook at lines 11 to 13 of login dot t s. This is where login starts.\u201d';
+const SAY2='\u201cLook at lines 14 to 18 of validate dot t s. It checks the email before anyone is looked up.\u201d';
+window.setT=function(t){
+  const second=t>=8.6;
+  mount(second?'validate.ts':'login.ts');
+  $('tree').innerHTML=D.trees[(t>=8.2)?'validate.ts':'login.ts'];
+  $('tabs').innerHTML=(second?[['login.ts',0],['validate.ts',1]]:[['login.ts',1]]).map(([n,on])=>`<div class="tab ${on?'on':''}"><em>TS</em>${n}</div>`).join('');
+  $('ttl').textContent=(second?'validate.ts':'login.ts')+' - demo-project - Visual Studio Code';
+  $('crumb').textContent=second?'src > auth > validate.ts > validateCredentials':'src > login.ts > handleLogin';
+  let range=null,alpha=0;
+  if(!second){range=[11,13];alpha=.22*ease(clamp((t-1)/1.2))*(1-ease(clamp((t-8)/.5)));}
+  else{range=[14,18];alpha=.22*ease(clamp((t-9.4)/1.2))*(1-ease(clamp((t-17)/.8)));}
+  paint(range,alpha);
+  const say=second?SAY2:SAY1,t0=second?9.8:1.6;
+  const n=Math.floor(clamp((t-t0)/2.6)*say.length);
+  const showB=second?(t>=9.8&&t<17.2):(t>=1.6&&t<8);
+  $('bub').style.opacity=showB?1:0;$('step').style.opacity=showB?1:0;
+  $('bub').textContent=say.slice(0,n);$('step').textContent=second?'STEP 2 OF 6':'STEP 1 OF 6';
+  document.querySelector('.pet img').style.transform=`translateY(${Math.sin(t*3.2)*-2}px)`;
+  document.body.style.opacity=clamp(t/.3)*clamp((18-t)/.4);
+};
 </script></body></html>
