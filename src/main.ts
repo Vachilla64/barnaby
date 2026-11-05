@@ -44,8 +44,8 @@ async function main() {
   }
 
   const agentKind = "claude-code";
-  const petCfg = config.pets[agentKind] || { colour: "#E8875B", x: null, y: null };
-  const petColor = petCfg.colour || "#E8875B";
+  const petCfg = config.pets[agentKind] || { colour: "#37E6F5", x: null, y: null };
+  const petColor = petCfg.colour || "#37E6F5";
 
   // Default placement: bottom right, standing on the floor (the top of the taskbar).
   // A saved position is kept, but never below the floor.

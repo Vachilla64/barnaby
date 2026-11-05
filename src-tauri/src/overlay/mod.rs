@@ -31,7 +31,7 @@ pub fn get_config() -> Result<config::AppConfig, String> {
 pub fn save_pet_position(agent_kind: String, x: i32, y: i32) -> Result<(), String> {
     let mut cfg = config::load_or_create_config().map_err(|e| e.to_string())?;
     let pet = cfg.pets.entry(agent_kind).or_insert_with(|| config::PetConfig {
-        colour: "#E8875B".to_string(),
+        colour: "#37E6F5".to_string(),
         x: None,
         y: None,
     });

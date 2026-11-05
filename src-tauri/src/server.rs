@@ -63,7 +63,7 @@ pub fn pet_colour(kind: &str) -> String {
     crate::config::load_or_create_config()
         .ok()
         .and_then(|cfg| cfg.pets.get(kind).map(|p| p.colour.clone()))
-        .unwrap_or_else(|| "#E8875B".into())
+        .unwrap_or_else(|| "#37E6F5".into())
 }
 
 /// Speak through the queue with the voice configured for this agent kind.
