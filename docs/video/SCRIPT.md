@@ -1,26 +1,33 @@
-# Demo video script, version 2 (draft)
+# Demo video script, version 3 (three voices)
 
-Goal: make people want to use Barnaby. Sell what he does for them, not who he is.
-Length: 3:00 or less. Your voice-over is recorded separately, then split to fit the screen recording.
-Pictures of the plan: [planned-pictures.png](planned-pictures.png). Screen parts are illustrations until the real recording exists.
+Goal: make people want to use Barnaby. Sell what he does for the viewer. Do not describe his character.
+Length: 3:00 or less. Wording reviewed by Argon, then checked against the real demo project.
 
-| Time | Voice-over | On screen |
+## Voices
+
+- NARRATOR: made with Mistral Voxtral TTS. Text in `VOICEOVER-MISTRAL.md`.
+- DEV: recorded by Alfred. Three short lines.
+- BARNABY: his normal Phonon voice, taken from the screen recording. Never scripted. Use whatever he really says.
+
+## Timeline
+
+| Time | Voice | Screen |
 |---|---|---|
-| 0:00 to 0:12 | An AI agent just wrote your whole app. It works. But if someone asks how login works, could you explain it? | Agent says "Done". Question appears. |
-| 0:12 to 0:25 | Most of us open file after file and still are not sure. | Files and a search box. |
-| 0:25 to 0:40 | Barnaby fixes that. He reads your project and explains it, out loud, in plain words. | Barnaby on the desktop. |
-| 0:40 to 1:20 | I ask: how does login work? Show me. About twenty seconds later, I get a spoken answer and a step-by-step tour. | Recording: ask and answer. Cut the wait. |
-| 1:20 to 1:55 | He walks me through it. Each file opens, the right lines are marked, and he tells me why they matter. Now I understand the code I am shipping. | Recording: the tour. |
-| 1:55 to 2:15 | I stay in control. He only reads the folder I choose. And one switch tells him to just point, and leave my editor alone. | Recording: Settings switch. |
-| 2:15 to 2:40 | He also listens to my coding agents. When Claude Code finishes, he tells me, so I can step away from the terminal. | Recording: optional. |
-| 2:40 to 2:52 | Muse Spark, through the Meta Model API, reads the project. The voice runs on my own computer. | "Built with" card. |
-| 2:52 to 3:00 | Barnaby. Understand the code you ship. Link below. | End card. |
+| 0:00 to 0:12 | Narrator 1 | Agent prints "Done." A message asks how login works. |
+| 0:12 to 0:22 | Narrator 2 | Fast cuts through a big file tree. |
+| 0:22 to 0:35 | Narrator 3 | Barnaby on the desktop. |
+| 0:35 to 0:50 | Narrator 4, then Dev 1 | The question is typed in the app. |
+| 0:50 to 1:15 | Narrator 5, then Barnaby (real) | The wait is cut. Barnaby starts speaking. |
+| 1:15 to 1:55 | Narrator 6, Barnaby (real), Narrator 7 | The tour in VS Code. Files open, lines are marked in blue. |
+| 1:55 to 2:15 | Narrator 8 | Settings: the tour switch is turned off. |
+| 2:15 to 2:40 (optional) | Narrator 9, Barnaby (real: "Claude has finished."), Dev 3 | Claude Code finishes a task. |
+| 2:40 to 2:52 | Narrator 10 | "Built with" card. |
+| 2:52 to 3:00 | Narrator 11 | End card with the GitHub link. |
 
-About 190 words. It is shorter than the first draft because the screen carries the rest.
+## Checks before recording
 
-## Rules for this script
-
-- Do not describe his character. Show him, do not explain him.
-- Every line answers "what does this do for me?"
-- Do not claim anything the app has not been shown doing. Test the tour with VS Code moving before you record 1:20 to 1:55. If it fails, change that line to "He tells me where to look."
-- The 2:15 line is optional. Drop it if Connect Claude Code is not set up.
+1. Tour with VS Code moving: not tested in the newest build. If lines are not marked, change Narrator 6 to: "He opens each file, tells you which lines to look at, and explains why they matter."
+2. Type the question in the app. Push-to-talk with a real microphone is untested.
+3. Cut the 19-second wait.
+4. Leave gaps so the three voices do not talk over each other.
+5. The 2:15 section is optional.
