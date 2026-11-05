@@ -1,0 +1,124 @@
+<!doctype html><html><head><meta charset="utf-8"><style>
+*{box-sizing:border-box}
+body{margin:0;width:1280px;height:720px;overflow:hidden;background:#fff;font-family:"DejaVu Sans Mono",Menlo,Consolas,monospace;color:#14202b;position:relative}
+.grid{position:absolute;inset:0;background-image:linear-gradient(#e8eef3 1px,transparent 1px),linear-gradient(90deg,#e8eef3 1px,transparent 1px);background-size:40px 40px}
+.abs{position:absolute}
+.px{image-rendering:pixelated}
+.box{position:absolute;border:2px solid #14202b;background:#fff;padding:10px 14px;font-size:20px;font-weight:bold;box-shadow:5px 5px 0 #14202b}
+.dash{border-style:dashed;box-shadow:none;color:#5a6b78;border-color:#8a9aa6}
+.cap{position:absolute;left:0;right:0;bottom:34px;text-align:center;font-size:26px;color:#14202b}
+.cap span{background:#fff;padding:4px 14px;border:2px solid #0aa5b8}
+.tag{font-size:15px;color:#0a8a9a;font-weight:bold}
+.code{background:#101820;color:#9fb3c2;font-size:19px;line-height:1.7;padding:14px 0;width:430px;box-shadow:6px 6px 0 #14202b}
+.code div{padding:0 16px;white-space:pre}
+.hl{background:#c9a24a55;border-left:5px solid #c9a24a;color:#fff;padding-left:11px!important}
+svg.lines{position:absolute;inset:0}
+</style></head><body>
+<div class="grid"></div>
+
+<!-- S1 intro -->
+<div id="s1" class="abs" style="inset:0">
+  <div class="abs" style="left:0;right:0;top:110px;text-align:center;font-size:30px;color:#0a8a9a;letter-spacing:.2em">INTRODUCING</div>
+  <div class="abs" style="left:0;right:0;top:160px;text-align:center;font-size:110px;font-weight:bold">Meet Barnaby</div>
+  <div class="abs" style="left:0;right:0;top:310px;text-align:center;font-size:28px;color:#3a4b58">A desktop pet that speaks for your coding agents.</div>
+  <img id="b1" class="abs px" src="../../../site/barnaby.svg" style="left:565px;top:365px;height:230px">
+</div>
+
+<!-- S2 diagram -->
+<div id="s2" class="abs" style="inset:0">
+  <div class="abs" style="left:0;right:0;top:34px;text-align:center;font-size:30px;font-weight:bold">Agents work in a terminal. Barnaby tells you.</div>
+  <svg class="lines" id="lines" viewBox="0 0 1280 720">
+    <g stroke="#14202b" stroke-width="3" fill="none">
+      <path id="p1" d="M330 165 H470 V350 H520"/>
+      <path id="p2" d="M330 265 H450 V350 H520"/>
+      <path id="p3" d="M330 365 H520" stroke-dasharray="10 8" stroke="#8a9aa6"/>
+      <path id="p4" d="M330 465 H450 V400 H520" stroke-dasharray="10 8" stroke="#8a9aa6"/>
+      <path id="p5" d="M330 565 H470 V420 H520" stroke-dasharray="10 8" stroke="#8a9aa6"/>
+    </g>
+    <path id="p6" d="M760 380 H920" stroke="#0aa5b8" stroke-width="4" fill="none"/>
+    <g id="dots" fill="#0aa5b8"></g>
+  </svg>
+  <div class="box" id="a1" style="left:90px;top:135px;width:240px">Claude Code</div>
+  <div class="box" id="a2" style="left:90px;top:235px;width:240px">Gemini CLI</div>
+  <div class="box dash" id="a3" style="left:90px;top:335px;width:240px">Antigravity</div>
+  <div class="box dash" id="a4" style="left:90px;top:435px;width:240px">Codex</div>
+  <div class="box dash" id="a5" style="left:90px;top:535px;width:240px">Any MCP agent</div>
+  <div class="abs tag" id="mcpt" style="left:352px;top:118px">MCP</div>
+  <div class="abs" id="plate" style="left:520px;top:250px;width:240px;height:290px;border-radius:50%;background:#e6f6f8;border:3px solid #0aa5b8"></div>
+  <img id="b2" class="abs px" src="../../../site/barnaby.svg" style="left:540px;top:265px;height:260px">
+  <div class="abs" style="left:490px;top:552px;width:300px;text-align:center;font-weight:bold;font-size:22px" id="bl">Barnaby<br><span class="tag">hosts an MCP server</span></div>
+  <div class="abs" id="you" style="left:930px;top:300px;width:260px;text-align:center">
+    <div style="font-size:64px;line-height:1">🎧</div><div style="font-weight:bold;font-size:24px;margin-top:6px">You</div>
+  </div>
+  <div class="abs" id="bub" style="left:880px;top:200px;width:330px;background:#fff;border:2px solid #14202b;padding:10px 14px;font-size:21px;box-shadow:5px 5px 0 #14202b">"Claude has finished."</div>
+  <div class="abs tag" id="dashnote" style="left:90px;top:600px;width:240px;text-align:center;color:#5a6b78;font-weight:normal">dashed: manual setup</div>
+</div>
+
+<!-- S3 ask -->
+<div id="s3" class="abs" style="inset:0">
+  <div class="abs" style="left:0;right:0;top:34px;text-align:center;font-size:30px;font-weight:bold">Ask about your code. He reads it and walks you through.</div>
+  <div class="box" style="left:50px;top:150px;width:380px;font-weight:normal;font-size:19px" id="q"></div>
+  <div class="abs" id="arr1" style="left:450px;top:150px;font-size:44px">→</div>
+  <div class="box" id="ms" style="left:500px;top:140px;width:320px">Muse Spark<br><span class="tag">Meta Model API</span></div>
+  <div class="abs tag" id="fold" style="left:500px;top:235px;width:320px">reads only your project folder</div>
+  <img id="b3" class="abs px" src="../../../site/barnaby-back.svg" style="left:60px;top:330px;height:280px">
+  <div class="abs code" id="code" style="left:760px;top:330px">
+    <div>1  export function login(</div>
+    <div id="l2">2    user: string, pass: string</div>
+    <div id="l3">3  ) { validate(user, pass)</div>
+    <div>4    return makeSession(user)</div>
+    <div>5  }</div>
+  </div>
+  <div class="abs tag" id="vs" style="left:760px;top:302px">VS CODE</div>
+  <div class="abs" id="say" style="left:330px;top:360px;width:390px;background:#fff;border:2px solid #14202b;padding:10px 14px;font-size:21px;box-shadow:5px 5px 0 #14202b">"Look at lines 2 and 3 of the login file."</div>
+</div>
+
+<!-- S4 end -->
+<div id="s4" class="abs" style="inset:0">
+  <img id="b4" class="abs px" src="../../../site/barnaby.svg" style="left:560px;top:90px;height:300px">
+  <div class="abs" style="left:0;right:0;top:420px;text-align:center;font-size:72px;font-weight:bold">Barnaby</div>
+  <div class="abs" style="left:0;right:0;top:515px;text-align:center;font-size:26px;color:#0a8a9a">github.com/Vachilla64/barnaby</div>
+  <div class="abs" style="left:0;right:0;top:560px;text-align:center;font-size:20px;color:#5a6b78">Windows desktop pet. Built with Meta's Muse Spark.</div>
+</div>
+
+<div class="cap" id="cap"><span id="capt"></span></div>
+<script>
+const $=id=>document.getElementById(id);
+const clamp=(x,a=0,b=1)=>Math.min(b,Math.max(a,x));
+const ease=x=>1-Math.pow(1-clamp(x),3);
+const win=(t,a,b,f=.4)=>Math.min(clamp((t-a)/f),clamp((b-t)/f));
+const caps=[[0.6,4,"Meet Barnaby."],[4.2,9.5,"Coding agents talk to Barnaby over MCP."],[9.5,15,"He tells you what they are doing, out loud."],[15.5,21,"Ask a question. Muse Spark reads your project."],[21,26,"He says where to look. VS Code can follow."],[26.5,30,"Meet Barnaby."]];
+const dots=$('dots');
+for(let i=0;i<14;i++){const c=document.createElementNS('http://www.w3.org/2000/svg','circle');c.setAttribute('r',7);dots.appendChild(c)}
+const paths=['p1','p2','p3','p4','p5'].map(i=>$(i)), p6=$('p6');
+window.setT=function(t){
+ $('s1').style.opacity=win(t,0,4.2,.5)*1; if(t<.5)$('s1').style.opacity=ease(t/.5);
+ const b1=$('b1');b1.style.transform=`translateY(${(1-ease((t-.2)/.8))*60 + Math.abs(Math.sin(t*3))*-6}px)`;
+ $('s2').style.opacity=win(t,4,15.6,.5);
+ // reveal agents
+ ['a1','a2','a3','a4','a5'].forEach((id,i)=>{const e=$(id);const k=ease((t-4.4-i*.35)/.5);e.style.opacity=k;e.style.transform=`translateX(${(1-k)*-40}px)`});
+ paths.forEach((p,i)=>{const L=p.getTotalLength();const k=clamp((t-5.2-i*.3)/.9);p.style.strokeDasharray=p.getAttribute('stroke-dasharray')?p.getAttribute('stroke-dasharray'):L;if(!p.getAttribute('stroke-dasharray'))p.style.strokeDashoffset=L*(1-k);p.style.opacity=k});
+ $('mcpt').style.opacity=ease((t-5.5)/.4);
+ const kb=ease((t-4.6)/.6);$('plate').style.opacity=kb;$('b2').style.opacity=kb;$('bl').style.opacity=ease((t-6.2)/.5);
+ $('b2').style.transform=`translateY(${Math.sin(t*4)*-4}px)`;
+ $('dashnote').style.opacity=ease((t-7)/.5);
+ // packets
+ [...dots.children].forEach((c,j)=>{const i=j%5;const p=paths[i];const L=p.getTotalLength();const ph=((t-7.2-i*.5-Math.floor(j/5)*1.6)/1.8);if(ph<0||ph>1||t>15){c.setAttribute('r',0);return}const pt=p.getPointAtLength(L*ph);c.setAttribute('cx',pt.x);c.setAttribute('cy',pt.y);c.setAttribute('r',7)});
+ const k6=clamp((t-9.5)/.8);p6.style.opacity=k6;
+ const ky=ease((t-9.3)/.5);$('you').style.opacity=ky;
+ $('bub').style.opacity=ease((t-10.5)/.4);$('bub').style.transform=`scale(${.9+.1*ease((t-10.5)/.4)})`;
+ // S3
+ $('s3').style.opacity=win(t,15.4,26.2,.5);
+ const full="How does login work? Show me.";const n=Math.floor(clamp((t-16)/1.6)*full.length);$('q').textContent=full.slice(0,n)+(n<full.length?'▌':'');
+ $('q').style.opacity=ease((t-15.8)/.3);
+ $('arr1').style.opacity=ease((t-17.8)/.3);$('ms').style.opacity=ease((t-18)/.4);$('fold').style.opacity=ease((t-18.8)/.4);
+ $('b3').style.opacity=ease((t-19.5)/.5);$('b3').style.transform=`scaleX(-1) translateY(${Math.sin(t*4)*-3}px)`;
+ $('say').style.opacity=ease((t-21)/.4);$('code').style.opacity=ease((t-21.5)/.4);$('vs').style.opacity=ease((t-21.5)/.4);
+ const h=ease((t-22.5)/.3);['l2','l3'].forEach(i=>{$(i).className=h>.5?'hl':''});
+ // S4
+ $('s4').style.opacity=ease((t-26.2)/.5);$('b4').style.transform=`translateY(${Math.abs(Math.sin(t*3))*-8}px)`;
+ // captions
+ const c=caps.find(c=>t>=c[0]&&t<c[1]);$('cap').style.opacity=c?1:0;if(c)$('capt').textContent=c[2];
+};
+setT(0);
+</script></body></html>
