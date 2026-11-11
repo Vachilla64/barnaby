@@ -396,6 +396,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             overlay::set_click_regions,
             overlay::set_drag_state,
+            overlay::platforms::scan_window_platforms,
+            overlay::platforms::get_window_bounds,
             overlay::get_config,
             overlay::save_pet_position,
             overlay::open_settings,

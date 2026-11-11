@@ -1,8 +1,10 @@
 pub mod clickthrough;
 pub mod monitors;
+pub mod platforms;
 
 use crate::config;
 pub use clickthrough::{ClickRegion, ClickthroughManager};
+pub use platforms::{get_window_bounds, scan_window_platforms, PlatformRect, PlatformSegment};
 use std::sync::Arc;
 use tauri::{AppHandle, Manager, State};
 

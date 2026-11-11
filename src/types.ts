@@ -5,6 +5,21 @@ export interface ClickRegion {
   height: number;
 }
 
+export interface PlatformSegment {
+  x1: number;
+  x2: number;
+  y: number;
+  hwnd: number;
+  title: string;
+}
+
+export interface PlatformRect {
+  left: number;
+  top: number;
+  right: number;
+  bottom: number;
+}
+
 export type PetState =
   | "idle"
   | "working"
