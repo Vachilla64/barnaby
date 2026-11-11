@@ -15,8 +15,7 @@ spec.loader.exec_module(pet)
 
 SIZE = 128
 SCALE = 4
-BG = (24, 29, 42, 255)
-BRASS = (201, 162, 75, 255)
+BG = (0, 0, 0, 0)
 
 p = pet.parts()
 # Head and hat only: rows 0-28, x 3-28 (the brim is the widest part).
@@ -30,11 +29,6 @@ w, h = (x1 - x0) * SCALE, (y1 - y0) * SCALE
 ox, oy = (SIZE - w) // 2, (SIZE - h) // 2 + 2
 
 img = Image.new("RGBA", (SIZE, SIZE), BG)
-# Brass frame, two pixels thick.
-for i in range(SIZE):
-    for t in range(3):
-        for a, b in ((i, t), (i, SIZE - 1 - t), (t, i), (SIZE - 1 - t, i)):
-            img.putpixel((a, b), BRASS)
 
 for x, y, ch in face:
     if not (x0 <= x < x1 and y0 <= y < y1):

@@ -43,13 +43,15 @@ function problem(message: string): void {
 /** Where Barnaby keeps its config. APPDATA first; the default location if that is missing or unreadable. */
 function configPaths(): string[] {
   const roaming = path.join(os.homedir(), "AppData", "Roaming");
-  const dirs = [process.env.APPDATA ?? roaming, roaming];
-  return [...new Set(dirs)].map((d) => path.join(d, "Barnaby", "config.json"));
+  const local = path.join(os.homedir(), "AppData", "Local");
+  const dirs = [process.env.APPDATA ?? roaming, roaming, path.join(local, "Barnaby")];
+  return [...new Set(dirs)].map((d) => (d.endsWith("Barnaby") ? path.join(d, "config.json") : path.join(d, "Barnaby", "config.json")));
 }
 
 function readConfig(): BarnabyConfig | undefined {
   for (const file of configPaths()) {
     try {
+      if (!fs.existsSync(file)) continue;
       const cfg = JSON.parse(fs.readFileSync(file, "utf8"));
       if (typeof cfg.port === "number" && typeof cfg.token === "string") {
         return { port: cfg.port, token: cfg.token };
@@ -200,7 +202,7 @@ async function showStep(step: TourStep): Promise<void> {
 
 function sendContext(): void {
   const editor = vscode.window.activeTextEditor;
-  if (!editor) return;
+  if (!editor || editor.document.uri.scheme !== "file") return;
   const sel = editor.selection;
   send({
     type: "editor.context",
@@ -245,6 +247,14 @@ export function activate(context: vscode.ExtensionContext): void {
     vscode.commands.registerCommand("barnaby.stop", () => {
       control("stop");
       clearHighlight();
+    }),
+    vscode.workspace.onDidChangeWorkspaceFolders(() => {
+      send({
+        type: "hello",
+        workspace_folders: (vscode.workspace.workspaceFolders ?? []).map((f) => f.uri.fsPath),
+        vscode_version: vscode.version,
+      });
+      sendContext();
     }),
     vscode.window.onDidChangeTextEditorSelection(scheduleContext),
     vscode.window.onDidChangeActiveTextEditor(scheduleContext),
